@@ -1,9 +1,10 @@
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { ThemeProvider } from "next-themes";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 import { queryClient } from "./lib/queryClient";
+import { AuthProvider, useAuth } from "@/hooks/use-auth";
 
 import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/auth/login";
@@ -18,6 +19,26 @@ import ProfileSettingsPage from "@/pages/app/settings";
 import ProfilePage from "@/pages/app/profile";
 import NotFound from "@/pages/not-found";
 
+function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+  const { user, loading } = useAuth();
+  const [, setLocation] = useLocation();
+
+  if (loading) {
+    return (
+      <div className="min-h-dvh grid place-items-center">
+        <div className="text-muted-foreground">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    setLocation("/login");
+    return null;
+  }
+
+  return <Component />;
+}
+
 function Router() {
   return (
     <Switch>
@@ -28,13 +49,13 @@ function Router() {
       <Route path="/forgot-password" component={ForgotPasswordPage} />
 
       <Route path="/app" component={() => <Redirect to="/app/dashboard" />} />
-      <Route path="/app/dashboard" component={DashboardPage} />
-      <Route path="/app/contacts" component={ContactsPage} />
-      <Route path="/app/campaigns" component={CampaignSettingsPage} />
-      <Route path="/app/analytics" component={AnalyticsPage} />
-      <Route path="/app/integrations" component={IntegrationsPage} />
-      <Route path="/app/settings" component={ProfileSettingsPage} />
-      <Route path="/app/profile" component={ProfilePage} />
+      <Route path="/app/dashboard" component={() => <ProtectedRoute component={DashboardPage} />} />
+      <Route path="/app/contacts" component={() => <ProtectedRoute component={ContactsPage} />} />
+      <Route path="/app/campaigns" component={() => <ProtectedRoute component={CampaignSettingsPage} />} />
+      <Route path="/app/analytics" component={() => <ProtectedRoute component={AnalyticsPage} />} />
+      <Route path="/app/integrations" component={() => <ProtectedRoute component={IntegrationsPage} />} />
+      <Route path="/app/settings" component={() => <ProtectedRoute component={ProfileSettingsPage} />} />
+      <Route path="/app/profile" component={() => <ProtectedRoute component={ProfilePage} />} />
 
       <Route component={NotFound} />
     </Switch>
@@ -46,10 +67,12 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <TooltipProvider>
-          <Toaster />
-          <div className="min-h-dvh app-bg transition-colors duration-500">
-            <Router />
-          </div>
+          <AuthProvider>
+            <Toaster />
+            <div className="min-h-dvh app-bg transition-colors duration-500">
+              <Router />
+            </div>
+          </AuthProvider>
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>

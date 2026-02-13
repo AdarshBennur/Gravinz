@@ -22,13 +22,13 @@ args = "Frontend Dev Server"
 name = "Frontend Dev Server"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "cd SaaS-Frontend && npm run dev:client"
-waitForPort = 5000
-
 [workflows.workflow.metadata]
 outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd SaaS-Frontend && npm run dev"
+waitForPort = 5000
 
 [[ports]]
 localPort = 5000

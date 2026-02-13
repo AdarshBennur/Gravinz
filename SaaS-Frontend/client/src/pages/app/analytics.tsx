@@ -1,28 +1,29 @@
-import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts";
 
 import AppShell from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { apiGet } from "@/lib/api";
+
+interface AnalyticsData {
+  daily: Array<{ day: string; sent: number; replies: number }>;
+  totalSent: number;
+  totalReplies: number;
+  replyRate: number;
+}
 
 export default function AnalyticsPage() {
-  const data = useMemo(
-    () =>
-      [
-        { day: "Mon", sent: 42, replies: 6 },
-        { day: "Tue", sent: 55, replies: 8 },
-        { day: "Wed", sent: 60, replies: 9 },
-        { day: "Thu", sent: 44, replies: 5 },
-        { day: "Fri", sent: 70, replies: 10 },
-        { day: "Sat", sent: 30, replies: 4 },
-        { day: "Sun", sent: 20, replies: 2 },
-      ],
-    [],
-  );
+  const { data, isLoading } = useQuery<AnalyticsData>({
+    queryKey: ["/api/analytics"],
+    queryFn: () => apiGet<AnalyticsData>("/api/analytics"),
+  });
 
-  const totalSent = data.reduce((a, d) => a + d.sent, 0);
-  const totalReplies = data.reduce((a, d) => a + d.replies, 0);
-  const replyRate = Math.round((totalReplies / totalSent) * 100);
+  const daily = data?.daily ?? [];
+  const totalSent = data?.totalSent ?? 0;
+  const totalReplies = data?.totalReplies ?? 0;
+  const replyRate = data?.replyRate ?? 0;
 
   const topSubjects = [
     "Quick question about {Role} at {Company}",
@@ -35,14 +36,18 @@ export default function AnalyticsPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="glass p-6" data-testid="card-reply-rate">
           <div className="text-xs text-muted-foreground" data-testid="text-reply-rate-label">Reply rate</div>
-          <div className="mt-2 text-3xl font-semibold" data-testid="text-reply-rate">{replyRate}%</div>
+          <div className="mt-2 text-3xl font-semibold" data-testid="text-reply-rate">
+            {isLoading ? <Skeleton className="h-9 w-16" /> : `${replyRate}%`}
+          </div>
           <div className="mt-2 text-xs text-muted-foreground" data-testid="text-reply-rate-sub">
-            Based on last 7 days (mock)
+            Based on last 7 days
           </div>
         </Card>
         <Card className="glass p-6" data-testid="card-total-sent">
           <div className="text-xs text-muted-foreground" data-testid="text-total-sent-label">Total emails sent</div>
-          <div className="mt-2 text-3xl font-semibold" data-testid="text-total-sent">{totalSent}</div>
+          <div className="mt-2 text-3xl font-semibold" data-testid="text-total-sent">
+            {isLoading ? <Skeleton className="h-9 w-16" /> : totalSent}
+          </div>
           <div className="mt-2 text-xs text-muted-foreground" data-testid="text-total-sent-sub">
             Including follow-ups
           </div>
@@ -66,42 +71,50 @@ export default function AnalyticsPage() {
           </div>
 
           <div className="mt-5 h-64 w-full" data-testid="chart-trend">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data}>
-                <CartesianGrid stroke="hsl(var(--border) / 0.6)" />
-                <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" />
-                <YAxis stroke="hsl(var(--muted-foreground))" />
-                <Tooltip
-                  contentStyle={{
-                    background: "hsl(var(--card) / 0.92)",
-                    border: "1px solid hsl(var(--border) / 0.7)",
-                    borderRadius: 12,
-                    boxShadow: "var(--shadow-lg)",
-                  }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="sent"
-                  stroke="hsl(var(--primary))"
-                  strokeWidth={2.5}
-                  dot={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="replies"
-                  stroke="hsl(var(--chart-2))"
-                  strokeWidth={2.5}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {isLoading ? (
+              <Skeleton className="h-full w-full" />
+            ) : daily.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-muted-foreground">
+                No data available yet
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={daily}>
+                  <CartesianGrid stroke="hsl(var(--border) / 0.6)" />
+                  <XAxis dataKey="day" stroke="hsl(var(--muted-foreground))" />
+                  <YAxis stroke="hsl(var(--muted-foreground))" />
+                  <Tooltip
+                    contentStyle={{
+                      background: "hsl(var(--card) / 0.92)",
+                      border: "1px solid hsl(var(--border) / 0.7)",
+                      borderRadius: 12,
+                      boxShadow: "var(--shadow-lg)",
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="sent"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={2.5}
+                    dot={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="replies"
+                    stroke="hsl(var(--chart-2))"
+                    strokeWidth={2.5}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </Card>
 
         <Card className="glass p-6" data-testid="card-subjects">
           <div className="text-sm font-semibold" data-testid="text-subjects-title">Top subject lines</div>
           <div className="mt-1 text-xs text-muted-foreground" data-testid="text-subjects-sub">
-            Highest reply rate (mock)
+            Highest reply rate
           </div>
 
           <div className="mt-4 space-y-2 text-sm">

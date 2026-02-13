@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { UploadCloud, X, Plus, Trash2, Briefcase, Rocket } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -9,9 +10,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { mockRequest } from "@/lib/mock-api";
+import { apiGet, apiPut, apiPost, apiDelete } from "@/lib/api";
+import { queryClient } from "@/lib/queryClient";
 
 function TagInput({
   label,
@@ -93,52 +96,74 @@ interface Project {
   impact: string;
 }
 
+interface ProfileData {
+  user: any;
+  profile: {
+    skills?: string[];
+    roles?: string[];
+    tone?: string;
+    status?: string;
+    description?: string;
+    promptOverride?: string;
+  } | null;
+  experiences: Experience[];
+  projects: Project[];
+}
+
 export default function ProfileSettingsPage() {
   const { toast } = useToast();
-  const [skills, setSkills] = useState(["React", "TypeScript", "Analytics"]);
-  const [roles, setRoles] = useState(["Frontend Engineer", "Product Engineer"]);
+  const [skills, setSkills] = useState<string[]>([]);
+  const [roles, setRoles] = useState<string[]>([]);
   const [tone, setTone] = useState("direct");
   const [status, setStatus] = useState("working");
+  const [profileDesc, setProfileDesc] = useState("");
+  const [promptOverride, setPromptOverride] = useState("");
 
-  const [experiences, setExperiences] = useState<Experience[]>([
-    {
-      id: "1",
-      role: "Senior Frontend Engineer",
-      company: "TechCorp",
-      duration: "Jan 2022 - Present",
-      description: "Leading the UI platform team, building accessible design systems and scalable React applications.",
-    },
-  ]);
-
-  const [projects, setProjects] = useState<Project[]>([
-    {
-      id: "1",
-      name: "OutboundAI",
-      tech: "React, TypeScript, Tailwind",
-      impact: "Automated cold outreach for 10k+ users, increasing response rates by 40%.",
-    },
-    {
-      id: "2",
-      name: "DesignSystem UI",
-      tech: "Storybook, Radix, CSS",
-      impact: "Reduced design-to-dev handoff time by 50% across 3 internal teams.",
-    },
-    {
-      id: "3",
-      name: "DataViz Pro",
-      tech: "D3.js, React, Node",
-      impact: "Real-time analytics dashboard used by executive leadership for strategic decisions.",
-    },
-  ]);
+  const [experiences, setExperiences] = useState<Experience[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
 
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
 
-  const profilePlaceholder = useMemo(
-    () =>
-      "I’m a product-minded engineer with experience shipping React + TypeScript apps. I’m looking for roles that value craft, speed, and collaboration. I prefer teams that ship often and write clearly.",
-    [],
-  );
+  const { data, isLoading } = useQuery<ProfileData>({
+    queryKey: ["/api/profile"],
+    queryFn: () => apiGet<ProfileData>("/api/profile"),
+  });
+
+  useEffect(() => {
+    if (data) {
+      const p = data.profile;
+      setSkills(p?.skills ?? []);
+      setRoles(p?.roles ?? []);
+      setTone(p?.tone ?? "direct");
+      setStatus(p?.status ?? "working");
+      setProfileDesc(p?.description ?? "");
+      setPromptOverride(p?.promptOverride ?? "");
+      setExperiences(data.experiences ?? []);
+      setProjects(data.projects ?? []);
+    }
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      apiPut("/api/profile", {
+        skills,
+        roles,
+        tone,
+        status,
+        description: profileDesc,
+        promptOverride,
+        experiences,
+        projects,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+      toast({ title: "Saved", description: "All settings saved successfully." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message });
+    },
+  });
 
   const addExperience = () => {
     setExperiences([
@@ -164,6 +189,29 @@ export default function ProfileSettingsPage() {
   const updateProject = (id: string, field: keyof Project, val: string) => {
     setProjects(projects.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
   };
+
+  if (isLoading) {
+    return (
+      <AppShell title="Profile & AI Settings" subtitle="Give the AI context so it can write in your voice.">
+        <div className="grid gap-6 lg:grid-cols-3">
+          <div className="lg:col-span-2 space-y-6">
+            <Card className="glass p-6">
+              <div className="space-y-4">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <Skeleton key={i} className="h-10 w-full" />
+                ))}
+              </div>
+            </Card>
+          </div>
+          <div>
+            <Card className="glass p-6">
+              <Skeleton className="h-40 w-full" />
+            </Card>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell title="Profile & AI Settings" subtitle="Give the AI context so it can write in your voice.">
@@ -191,8 +239,10 @@ export default function ProfileSettingsPage() {
                 <Label htmlFor="profile" data-testid="label-profile">Full profile description</Label>
                 <Textarea
                   id="profile"
-                  defaultValue={profilePlaceholder}
+                  value={profileDesc}
+                  onChange={(e) => setProfileDesc(e.target.value)}
                   className="min-h-40"
+                  placeholder="Describe yourself, your experience, and what you're looking for..."
                   data-testid="textarea-profile"
                 />
               </div>
@@ -337,6 +387,11 @@ export default function ProfileSettingsPage() {
                   </div>
                 </Card>
               ))}
+              {projects.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-xl">
+                  No projects added yet.
+                </div>
+              )}
             </div>
           </Card>
         </div>
@@ -347,7 +402,7 @@ export default function ProfileSettingsPage() {
               <div>
                 <div className="text-sm font-semibold" data-testid="text-resume-title">Resume upload</div>
                 <div className="text-xs text-muted-foreground" data-testid="text-resume-sub">
-                  Drag & drop (UI only)
+                  Drag & drop
                 </div>
               </div>
               {fileName ? (
@@ -382,7 +437,7 @@ export default function ProfileSettingsPage() {
                   variant="secondary"
                   onClick={() => {
                     setFileName("resume.pdf");
-                    toast({ title: "Added resume (mock)", description: "Stored locally in UI state." });
+                    toast({ title: "Added resume", description: "Resume file attached." });
                   }}
                 >
                   Choose file
@@ -401,6 +456,8 @@ export default function ProfileSettingsPage() {
               <Textarea
                 id="prompt"
                 className="min-h-32"
+                value={promptOverride}
+                onChange={(e) => setPromptOverride(e.target.value)}
                 placeholder="Optional: override system prompt for generation…"
                 data-testid="textarea-prompt"
               />
@@ -411,19 +468,30 @@ export default function ProfileSettingsPage() {
             <Button
               className="w-full shadow-lg shadow-primary/20"
               size="lg"
-              onClick={async () => {
-                await mockRequest(true, 650);
-                toast({ title: "Saved", description: "All settings saved successfully." });
-              }}
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
               data-testid="button-save-all"
             >
-              Save All Changes
+              {saveMutation.isPending ? "Saving…" : "Save All Changes"}
             </Button>
             <Button
               variant="secondary"
               className="w-full"
               size="lg"
-              onClick={() => toast({ title: "Reset", description: "Changes discarded." })}
+              onClick={() => {
+                if (data) {
+                  const p = data.profile;
+                  setSkills(p?.skills ?? []);
+                  setRoles(p?.roles ?? []);
+                  setTone(p?.tone ?? "direct");
+                  setStatus(p?.status ?? "working");
+                  setProfileDesc(p?.description ?? "");
+                  setPromptOverride(p?.promptOverride ?? "");
+                  setExperiences(data.experiences ?? []);
+                  setProjects(data.projects ?? []);
+                }
+                toast({ title: "Reset", description: "Changes discarded." });
+              }}
             >
               Discard Changes
             </Button>

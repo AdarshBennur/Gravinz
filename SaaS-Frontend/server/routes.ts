@@ -129,28 +129,62 @@ export async function registerRoutes(
   });
 
   app.get("/api/profile", requireAuth, async (req, res) => {
-    const userId = getSessionUserId(req)!;
-    const [profile, exps, projs] = await Promise.all([
-      storage.getUserProfile(userId),
-      storage.getExperiences(userId),
-      storage.getProjects(userId),
-    ]);
-    const user = await storage.getUser(userId);
-    res.json({
-      user: user
-        ? { id: user.id, username: user.username, email: user.email, fullName: user.fullName, avatarUrl: user.avatarUrl }
-        : null,
-      profile: profile || {},
-      experiences: exps,
-      projects: projs,
-    });
+    try {
+      const userId = getSessionUserId(req)!;
+      const [profile, exps, projs] = await Promise.all([
+        storage.getUserProfile(userId),
+        storage.getExperiences(userId),
+        storage.getProjects(userId),
+      ]);
+      const user = await storage.getUser(userId);
+      res.json({
+        user: user
+          ? { id: user.id, username: user.username, email: user.email, fullName: user.fullName, avatarUrl: user.avatarUrl }
+          : null,
+        profile: profile
+          ? {
+              skills: profile.skills || [],
+              roles: profile.targetRoles || [],
+              tone: profile.tone || "direct",
+              status: profile.currentStatus || "working",
+              description: profile.profileDescription || "",
+              customPrompt: profile.customPrompt || "",
+              resumeUrl: profile.resumeUrl || null,
+            }
+          : null,
+        experiences: exps,
+        projects: projs,
+      });
+    } catch (error: any) {
+      console.error("Get profile error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
   });
 
   app.put("/api/profile", requireAuth, async (req, res) => {
-    const userId = getSessionUserId(req)!;
-    const data = req.body;
-    const profile = await storage.upsertUserProfile(userId, data);
-    res.json(profile);
+    try {
+      const userId = getSessionUserId(req)!;
+      const { skills, roles, tone, status, description, customPrompt } = req.body;
+      const profile = await storage.upsertUserProfile(userId, {
+        skills: skills ?? undefined,
+        targetRoles: roles ?? undefined,
+        tone: tone ?? undefined,
+        currentStatus: status ?? undefined,
+        profileDescription: description ?? undefined,
+        customPrompt: customPrompt ?? undefined,
+      });
+      res.json({
+        skills: profile.skills || [],
+        roles: profile.targetRoles || [],
+        tone: profile.tone || "direct",
+        status: profile.currentStatus || "working",
+        description: profile.profileDescription || "",
+        customPrompt: profile.customPrompt || "",
+      });
+    } catch (error: any) {
+      console.error("Update profile error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
   });
 
   app.get("/api/experiences", requireAuth, async (req, res) => {
@@ -253,18 +287,49 @@ export async function registerRoutes(
   });
 
   app.get("/api/campaign-settings", requireAuth, async (req, res) => {
-    const userId = getSessionUserId(req)!;
-    let settings = await storage.getCampaignSettings(userId);
-    if (!settings) {
-      settings = await storage.upsertCampaignSettings(userId, {});
+    try {
+      const userId = getSessionUserId(req)!;
+      let settings = await storage.getCampaignSettings(userId);
+      if (!settings) {
+        settings = await storage.upsertCampaignSettings(userId, {});
+      }
+      res.json({
+        dailyLimit: settings.dailyLimit,
+        followups: settings.followupCount,
+        delays: settings.followupDelays,
+        priority: settings.priorityMode,
+        balanced: settings.balancedRatio,
+        automationStatus: settings.automationStatus,
+      });
+    } catch (error: any) {
+      console.error("Get campaign settings error:", error);
+      res.status(500).json({ message: "Internal server error" });
     }
-    res.json(settings);
   });
 
   app.put("/api/campaign-settings", requireAuth, async (req, res) => {
-    const userId = getSessionUserId(req)!;
-    const settings = await storage.upsertCampaignSettings(userId, req.body);
-    res.json(settings);
+    try {
+      const userId = getSessionUserId(req)!;
+      const { dailyLimit, followups, delays, priority, balanced } = req.body;
+      const settings = await storage.upsertCampaignSettings(userId, {
+        dailyLimit: dailyLimit ?? undefined,
+        followupCount: followups ?? undefined,
+        followupDelays: delays ?? undefined,
+        priorityMode: priority ?? undefined,
+        balancedRatio: balanced ?? undefined,
+      });
+      res.json({
+        dailyLimit: settings.dailyLimit,
+        followups: settings.followupCount,
+        delays: settings.followupDelays,
+        priority: settings.priorityMode,
+        balanced: settings.balancedRatio,
+        automationStatus: settings.automationStatus,
+      });
+    } catch (error: any) {
+      console.error("Update campaign settings error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
   });
 
   app.post("/api/automation/start", requireAuth, async (req, res) => {

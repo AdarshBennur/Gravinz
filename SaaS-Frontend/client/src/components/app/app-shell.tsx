@@ -10,8 +10,10 @@ import {
   Sun,
   Moon,
   Monitor,
+  LogOut,
 } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useAuth } from "@/hooks/use-auth";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -133,6 +135,12 @@ function ThemeToggle() {
 
 function Topbar() {
   const [, setLocation] = useLocation();
+  const { user, logout } = useAuth();
+
+  const handleLogout = async () => {
+    await logout();
+    setLocation("/login");
+  };
 
   return (
     <header className="sticky top-0 z-20 border-b bg-background/70 backdrop-blur">
@@ -169,12 +177,11 @@ function Topbar() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="rounded-full" data-testid="badge-env">
-            Prototype
-          </Badge>
-          <span className="hidden text-sm text-muted-foreground sm:inline" data-testid="text-env-sub">
-            Mock data • UI-only actions
-          </span>
+          {user && (
+            <span className="hidden text-sm text-muted-foreground sm:inline" data-testid="text-env-sub">
+              {user.fullName || user.username}
+            </span>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -191,7 +198,9 @@ function Topbar() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuLabel data-testid="text-user-menu-label">My Account</DropdownMenuLabel>
+              <DropdownMenuLabel data-testid="text-user-menu-label">
+                {user?.fullName || user?.username || "My Account"}
+              </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setLocation("/app/profile")} data-testid="menu-profile">
                 Profile
@@ -200,12 +209,8 @@ function Topbar() {
                 Settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => {
-                  setLocation("/login");
-                }}
-                data-testid="menu-logout"
-              >
+              <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
+                <LogOut className="mr-2 h-4 w-4" />
                 Log out
               </DropdownMenuItem>
             </DropdownMenuContent>

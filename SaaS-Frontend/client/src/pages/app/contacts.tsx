@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Plus, Upload } from "lucide-react";
+import { Plus, Upload, Trash2 } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -10,9 +11,12 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { apiGet, apiPost, apiDelete } from "@/lib/api";
+import { queryClient } from "@/lib/queryClient";
 
 type ContactStatus = "replied" | "followup" | "not-sent";
 
@@ -23,7 +27,7 @@ type Contact = {
   company: string;
   role: string;
   status: ContactStatus;
-  lastSent: string;
+  lastSentAt: string | null;
 };
 
 const statusLabel: Record<ContactStatus, string> = {
@@ -36,62 +40,56 @@ function StatusBadge({ status }: { status: ContactStatus }) {
   const variant = status === "replied" ? "default" : "secondary";
   return (
     <Badge variant={variant} className="rounded-full" data-testid={`status-contact-${status}`}>
-      {statusLabel[status]}
+      {statusLabel[status] ?? status}
     </Badge>
   );
+}
+
+function formatDate(dateStr: string | null): string {
+  if (!dateStr) return "—";
+  try {
+    return new Date(dateStr).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  } catch {
+    return "—";
+  }
 }
 
 export default function ContactsPage() {
   const { toast } = useToast();
   const [filter, setFilter] = useState<"all" | ContactStatus>("all");
   const [query, setQuery] = useState("");
-
   const [selected, setSelected] = useState<Record<string, boolean>>({});
-
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", company: "", role: "", status: "not-sent" as ContactStatus });
 
-  const contacts = useMemo<Contact[]>(
-    () => [
-      {
-        id: "c1",
-        name: "Jamie Lee",
-        email: "jamie@company.com",
-        company: "Figma",
-        role: "Product Engineer",
-        status: "replied",
-        lastSent: "Feb 10",
-      },
-      {
-        id: "c2",
-        name: "Ava Rivera",
-        email: "ava@company.com",
-        company: "Stripe",
-        role: "Frontend Engineer",
-        status: "followup",
-        lastSent: "Feb 11",
-      },
-      {
-        id: "c3",
-        name: "Niko Shah",
-        email: "niko@company.com",
-        company: "Notion",
-        role: "Product Engineer",
-        status: "not-sent",
-        lastSent: "—",
-      },
-      {
-        id: "c4",
-        name: "Priya K.",
-        email: "priya@company.com",
-        company: "Linear",
-        role: "Software Engineer",
-        status: "followup",
-        lastSent: "Feb 9",
-      },
-    ],
-    [],
-  );
+  const { data: contacts = [], isLoading } = useQuery<Contact[]>({
+    queryKey: ["/api/contacts"],
+    queryFn: () => apiGet<Contact[]>("/api/contacts"),
+  });
+
+  const addMutation = useMutation({
+    mutationFn: (data: typeof form) => apiPost("/api/contacts", data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      toast({ title: "Contact added" });
+      setOpen(false);
+      setForm({ name: "", email: "", company: "", role: "", status: "not-sent" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => apiDelete(`/api/contacts/${id}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      toast({ title: "Contact deleted" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message });
+    },
+  });
 
   const filtered = useMemo(() => {
     return contacts
@@ -119,7 +117,7 @@ export default function ContactsPage() {
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button
             variant="secondary"
-            onClick={() => toast({ title: "Upload CSV (UI)", description: "CSV import is mocked in this prototype." })}
+            onClick={() => toast({ title: "Upload CSV", description: "CSV import coming soon." })}
             data-testid="button-upload-csv"
           >
             <Upload className="mr-2 h-4 w-4" />
@@ -210,14 +208,11 @@ export default function ContactsPage() {
                   Cancel
                 </Button>
                 <Button
-                  onClick={() => {
-                    toast({ title: "Contact added (mock)", description: "This does not persist in prototype." });
-                    setOpen(false);
-                    setForm({ name: "", email: "", company: "", role: "", status: "not-sent" });
-                  }}
+                  onClick={() => addMutation.mutate(form)}
+                  disabled={addMutation.isPending}
                   data-testid="button-confirm-add-contact"
                 >
-                  Add
+                  {addMutation.isPending ? "Adding…" : "Add"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -277,26 +272,53 @@ export default function ContactsPage() {
                   <TableHead data-testid="th-role">Role</TableHead>
                   <TableHead data-testid="th-status">Status</TableHead>
                   <TableHead data-testid="th-last-sent">Last sent</TableHead>
+                  <TableHead className="w-10" data-testid="th-actions"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((c, idx) => (
-                  <TableRow key={c.id} data-testid={`row-contact-${c.id}`}>
-                    <TableCell data-testid={`cell-select-${c.id}`}>
-                      <Checkbox
-                        checked={Boolean(selected[c.id])}
-                        onCheckedChange={(v) => setSelected((s) => ({ ...s, [c.id]: Boolean(v) }))}
-                        data-testid={`checkbox-select-${c.id}`}
-                      />
-                    </TableCell>
-                    <TableCell className="font-medium" data-testid={`text-contact-name-${c.id}`}>{c.name}</TableCell>
-                    <TableCell className="text-muted-foreground" data-testid={`text-contact-email-${c.id}`}>{c.email}</TableCell>
-                    <TableCell data-testid={`text-contact-company-${c.id}`}>{c.company}</TableCell>
-                    <TableCell className="text-muted-foreground" data-testid={`text-contact-role-${c.id}`}>{c.role}</TableCell>
-                    <TableCell data-testid={`cell-status-${c.id}`}><StatusBadge status={c.status} /></TableCell>
-                    <TableCell className="text-muted-foreground" data-testid={`text-contact-last-sent-${c.id}`}>{c.lastSent}</TableCell>
-                  </TableRow>
-                ))}
+                {isLoading
+                  ? Array.from({ length: 4 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={8}>
+                          <Skeleton className="h-5 w-full" />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  : filtered.length === 0
+                    ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="text-center text-muted-foreground py-8">
+                          No contacts found
+                        </TableCell>
+                      </TableRow>
+                    )
+                    : filtered.map((c) => (
+                      <TableRow key={c.id} data-testid={`row-contact-${c.id}`}>
+                        <TableCell data-testid={`cell-select-${c.id}`}>
+                          <Checkbox
+                            checked={Boolean(selected[c.id])}
+                            onCheckedChange={(v) => setSelected((s) => ({ ...s, [c.id]: Boolean(v) }))}
+                            data-testid={`checkbox-select-${c.id}`}
+                          />
+                        </TableCell>
+                        <TableCell className="font-medium" data-testid={`text-contact-name-${c.id}`}>{c.name}</TableCell>
+                        <TableCell className="text-muted-foreground" data-testid={`text-contact-email-${c.id}`}>{c.email}</TableCell>
+                        <TableCell data-testid={`text-contact-company-${c.id}`}>{c.company}</TableCell>
+                        <TableCell className="text-muted-foreground" data-testid={`text-contact-role-${c.id}`}>{c.role}</TableCell>
+                        <TableCell data-testid={`cell-status-${c.id}`}><StatusBadge status={c.status} /></TableCell>
+                        <TableCell className="text-muted-foreground" data-testid={`text-contact-last-sent-${c.id}`}>{formatDate(c.lastSentAt)}</TableCell>
+                        <TableCell>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => deleteMutation.mutate(c.id)}
+                            disabled={deleteMutation.isPending}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
               </TableBody>
             </Table>
           </div>

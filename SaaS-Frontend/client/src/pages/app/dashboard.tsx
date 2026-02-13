@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { Pause, Play, Sparkles } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -10,7 +11,8 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { mockRequest } from "@/lib/mock-api";
+import { apiGet, apiPost } from "@/lib/api";
+import { queryClient } from "@/lib/queryClient";
 
 function AnimatedNumber({ value }: { value: number }) {
   const mv = useMotionValue(0);
@@ -24,38 +26,79 @@ function AnimatedNumber({ value }: { value: number }) {
   return <motion.span data-testid="text-animated-number">{rounded}</motion.span>;
 }
 
+function relativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "now";
+  if (diffMin < 60) return `${diffMin}m`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH}h`;
+  const diffD = Math.floor(diffH / 24);
+  return `${diffD}d`;
+}
+
+interface DashboardData {
+  stats: {
+    sentToday: number;
+    followupsPending: number;
+    replies: number;
+    dailyLimit: number;
+    used: number;
+  };
+  activity: Array<{
+    contact: string;
+    action: string;
+    createdAt: string;
+    status: string;
+  }>;
+  automationStatus: "running" | "paused";
+}
+
 export default function DashboardPage() {
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
-  const [running, setRunning] = useState(true);
+  const [steps, setSteps] = useState<string[]>([
+    "Tighten target roles",
+    "Refresh 2 subject lines",
+    "Queue follow-ups for warm leads",
+  ]);
 
-  const stats = useMemo(
-    () => ({
-      sentToday: 42,
-      followupsPending: 18,
-      replies: 7,
-      dailyLimit: 80,
-      used: 42,
-    }),
-    [],
-  );
+  const { data, isLoading: loading } = useQuery<DashboardData>({
+    queryKey: ["/api/dashboard"],
+    queryFn: () => apiGet<DashboardData>("/api/dashboard"),
+  });
 
-  const activity = useMemo(
-    () =>
-      [
-        { contact: "Jamie Lee", action: "Replied — Interested", time: "1h", status: "replied" },
-        { contact: "Ava Rivera", action: "Follow-up scheduled", time: "2h", status: "followup" },
-        { contact: "Niko Shah", action: "Email sent", time: "3h", status: "sent" },
-        { contact: "Priya K.", action: "Draft generated", time: "4h", status: "draft" },
-      ] as const,
-    [],
-  );
+  const stats = data?.stats ?? { sentToday: 0, followupsPending: 0, replies: 0, dailyLimit: 1, used: 0 };
+  const activity = data?.activity ?? [];
+  const running = data?.automationStatus === "running";
 
-  useEffect(() => {
-    mockRequest(true, 750).then(() => setLoading(false));
-  }, []);
+  const toggleMutation = useMutation({
+    mutationFn: () =>
+      apiPost(running ? "/api/automation/pause" : "/api/automation/start"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({
+        title: running ? "Automation paused" : "Automation started",
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message });
+    },
+  });
 
-  const progress = Math.round((stats.used / stats.dailyLimit) * 100);
+  const nextStepsMutation = useMutation({
+    mutationFn: () => apiPost<{ steps: string[] }>("/api/ai/generate-next-steps"),
+    onSuccess: (res) => {
+      setSteps(res.steps);
+      toast({ title: "Generated next steps" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message });
+    },
+  });
+
+  const progress = stats.dailyLimit > 0 ? Math.round((stats.used / stats.dailyLimit) * 100) : 0;
 
   return (
     <AppShell
@@ -67,13 +110,8 @@ export default function DashboardPage() {
             {running ? "Automation running" : "Automation paused"}
           </Badge>
           <Button
-            onClick={() => {
-              setRunning((v) => !v);
-              toast({
-                title: running ? "Automation paused" : "Automation started",
-                description: "This is a UI-only toggle in the prototype.",
-              });
-            }}
+            onClick={() => toggleMutation.mutate()}
+            disabled={toggleMutation.isPending}
             data-testid="button-toggle-automation"
           >
             {running ? (
@@ -132,7 +170,7 @@ export default function DashboardPage() {
             <div>
               <div className="text-sm font-semibold" data-testid="text-activity-title">Recent activity</div>
               <div className="text-xs text-muted-foreground" data-testid="text-activity-sub">
-                Latest automation events (mock data)
+                Latest automation events
               </div>
             </div>
           </div>
@@ -155,14 +193,22 @@ export default function DashboardPage() {
                         </TableCell>
                       </TableRow>
                     ))
-                  : activity.map((a, i) => (
+                  : activity.length === 0
+                    ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
+                          No recent activity
+                        </TableCell>
+                      </TableRow>
+                    )
+                    : activity.map((a, i) => (
                       <TableRow key={i} data-testid={`row-activity-${i}`}>
                         <TableCell className="font-medium" data-testid={`text-activity-contact-${i}`}>
                           {a.contact}
                         </TableCell>
                         <TableCell data-testid={`text-activity-action-${i}`}>{a.action}</TableCell>
                         <TableCell className="text-right text-muted-foreground" data-testid={`text-activity-time-${i}`}>
-                          {a.time}
+                          {a.createdAt ? relativeTime(a.createdAt) : ""}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -177,7 +223,7 @@ export default function DashboardPage() {
               <Sparkles className="h-4 w-4" />
             </div>
             <div>
-              <div className="text-sm font-semibold" data-testid="text-insights-title">Today’s focus</div>
+              <div className="text-sm font-semibold" data-testid="text-insights-title">Today's focus</div>
               <div className="text-xs text-muted-foreground" data-testid="text-insights-sub">
                 Keep reply rate high
               </div>
@@ -185,8 +231,8 @@ export default function DashboardPage() {
           </div>
 
           <div className="mt-5 space-y-3 text-sm">
-            {["Tighten target roles", "Refresh 2 subject lines", "Queue follow-ups for warm leads"].map((t, idx) => (
-              <div key={t} className="flex items-center justify-between rounded-xl border bg-background/60 px-3 py-2" data-testid={`row-insight-${idx}`}>
+            {steps.map((t, idx) => (
+              <div key={idx} className="flex items-center justify-between rounded-xl border bg-background/60 px-3 py-2" data-testid={`row-insight-${idx}`}>
                 <div className="text-muted-foreground" data-testid="text-insight">{t}</div>
                 <Badge variant="secondary" className="rounded-full" data-testid={`badge-insight-${idx}`}>
                   AI
@@ -198,15 +244,11 @@ export default function DashboardPage() {
           <Button
             variant="secondary"
             className="mt-5 w-full"
-            onClick={() =>
-              toast({
-                title: "Generated next steps (mock)",
-                description: "In a full app, this would call your AI service.",
-              })
-            }
+            disabled={nextStepsMutation.isPending}
+            onClick={() => nextStepsMutation.mutate()}
             data-testid="button-generate-next-steps"
           >
-            Generate next steps
+            {nextStepsMutation.isPending ? "Generating…" : "Generate next steps"}
           </Button>
         </Card>
       </div>

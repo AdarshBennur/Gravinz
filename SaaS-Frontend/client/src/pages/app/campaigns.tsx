@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Save } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -8,20 +9,75 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
-import { mockRequest } from "@/lib/mock-api";
+import { apiGet, apiPut } from "@/lib/api";
+import { queryClient } from "@/lib/queryClient";
+
+interface CampaignSettings {
+  dailyLimit: number;
+  followups: number;
+  delays: number[];
+  priority: "followups" | "fresh" | "balanced";
+  balanced: number;
+}
 
 export default function CampaignSettingsPage() {
   const { toast } = useToast();
   const [dailyLimit, setDailyLimit] = useState(80);
   const [followups, setFollowups] = useState(2);
   const [delays, setDelays] = useState<number[]>([2, 4]);
-
   const [priority, setPriority] = useState<"followups" | "fresh" | "balanced">("balanced");
   const [balanced, setBalanced] = useState(60);
 
+  const { data, isLoading } = useQuery<CampaignSettings>({
+    queryKey: ["/api/campaign-settings"],
+    queryFn: () => apiGet<CampaignSettings>("/api/campaign-settings"),
+  });
+
+  useEffect(() => {
+    if (data) {
+      setDailyLimit(data.dailyLimit ?? 80);
+      setFollowups(data.followups ?? 2);
+      setDelays(data.delays ?? [2, 4]);
+      setPriority(data.priority ?? "balanced");
+      setBalanced(data.balanced ?? 60);
+    }
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      apiPut("/api/campaign-settings", { dailyLimit, followups, delays, priority, balanced }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/campaign-settings"] });
+      toast({ title: "Saved", description: "Campaign settings saved." });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Error", description: err.message });
+    },
+  });
+
   const delayFields = useMemo(() => Array.from({ length: followups }), [followups]);
+
+  if (isLoading) {
+    return (
+      <AppShell title="Campaign settings" subtitle="Tune daily limits, follow-up cadence, and prioritization.">
+        <div className="grid gap-4 lg:grid-cols-3">
+          <Card className="glass p-6 lg:col-span-2">
+            <div className="space-y-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          </Card>
+          <Card className="glass p-6">
+            <Skeleton className="h-40 w-full" />
+          </Card>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell
@@ -157,20 +213,18 @@ export default function CampaignSettingsPage() {
             <div className="flex items-center justify-end gap-2">
               <Button
                 variant="secondary"
-                onClick={() => toast({ title: "Preview (mock)", description: "No backend actions in prototype." })}
+                onClick={() => toast({ title: "Preview", description: "Preview mode coming soon." })}
                 data-testid="button-preview-settings"
               >
                 Preview
               </Button>
               <Button
-                onClick={async () => {
-                  await mockRequest(true, 700);
-                  toast({ title: "Saved", description: "Campaign settings saved (mock)." });
-                }}
+                onClick={() => saveMutation.mutate()}
+                disabled={saveMutation.isPending}
                 data-testid="button-save-settings"
               >
                 <Save className="mr-2 h-4 w-4" />
-                Save settings
+                {saveMutation.isPending ? "Saving…" : "Save settings"}
               </Button>
             </div>
           </div>

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Github, Mail } from "lucide-react";
@@ -8,15 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 
 function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-dvh grid place-items-center px-4 py-10">
       <div className="w-full max-w-md">
         {children}
-        <div className="mt-6 text-center text-xs text-muted-foreground" data-testid="text-auth-disclaimer">
-          This is a frontend-only prototype. No real authentication.
-        </div>
       </div>
     </div>
   );
@@ -25,6 +24,27 @@ function AuthShell({ children }: { children: React.ReactNode }) {
 export default function LoginPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { login } = useAuth();
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    if (!username.trim() || !password.trim()) {
+      toast({ title: "Missing fields", description: "Please enter your username and password." });
+      return;
+    }
+    setLoading(true);
+    try {
+      await login(username, password);
+      toast({ title: "Welcome back!", description: "Redirecting to dashboard..." });
+      setLocation("/app/dashboard");
+    } catch (error: any) {
+      toast({ title: "Login failed", description: error.message || "Invalid credentials." });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <AuthShell>
@@ -47,8 +67,8 @@ export default function LoginPage() {
               className="justify-start"
               onClick={() =>
                 toast({
-                  title: "Google sign-in (UI only)",
-                  description: "Connect OAuth in a full app. This is a prototype.",
+                  title: "Google sign-in",
+                  description: "Google OAuth coming soon.",
                 })
               }
               data-testid="button-google-signin"
@@ -70,8 +90,15 @@ export default function LoginPage() {
 
             <div className="grid gap-3">
               <div className="grid gap-2">
-                <Label htmlFor="email" data-testid="label-email">Email</Label>
-                <Input id="email" type="email" placeholder="you@domain.com" data-testid="input-email" />
+                <Label htmlFor="username" data-testid="label-email">Username</Label>
+                <Input
+                  id="username"
+                  placeholder="your username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                  data-testid="input-email"
+                />
               </div>
               <div className="grid gap-2">
                 <div className="flex items-center justify-between">
@@ -80,24 +107,30 @@ export default function LoginPage() {
                     Forgot?
                   </Link>
                 </div>
-                <Input id="password" type="password" placeholder="••••••••" data-testid="input-password" />
+                <Input
+                  id="password"
+                  type="password"
+                  placeholder="your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                  data-testid="input-password"
+                />
               </div>
 
               <Button
                 className="mt-1"
-                onClick={() => {
-                  toast({ title: "Signed in (mock)", description: "Redirecting to dashboard…" });
-                  setLocation("/app/dashboard");
-                }}
+                onClick={handleLogin}
+                disabled={loading}
                 data-testid="button-submit-login"
               >
                 <Mail className="mr-2 h-4 w-4" />
-                Sign in
+                {loading ? "Signing in..." : "Sign in"}
               </Button>
             </div>
 
             <div className="text-sm text-muted-foreground" data-testid="text-auth-switch">
-              Don’t have an account?{" "}
+              Don't have an account?{" "}
               <Link href="/signup" className="text-primary hover:underline" data-testid="link-to-signup">
                 Sign up
               </Link>

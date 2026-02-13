@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Mail, NotionLogoIcon } from "@/components/app/icons";
 
 import AppShell from "@/components/app/app-shell";
@@ -7,21 +8,79 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
-import { mockRequest } from "@/lib/mock-api";
+import { apiGet, apiPost } from "@/lib/api";
+import { queryClient } from "@/lib/queryClient";
+
+interface IntegrationStatus {
+  gmail: { connected: boolean };
+  notion: { connected: boolean; metadata?: { databaseId?: string } };
+}
 
 export default function IntegrationsPage() {
   const { toast } = useToast();
-  const [gmailConnected, setGmailConnected] = useState(false);
-  const [notionConnected, setNotionConnected] = useState(false);
   const [dbId, setDbId] = useState("");
 
-  const gmailStatus = useMemo(() => (gmailConnected ? "Connected" : "Not connected"), [gmailConnected]);
-  const notionStatus = useMemo(
-    () => (notionConnected ? "Connected" : dbId.trim() ? "Ready to connect" : "Not connected"),
-    [notionConnected, dbId],
-  );
+  const { data, isLoading } = useQuery<IntegrationStatus>({
+    queryKey: ["/api/integrations"],
+    queryFn: () => apiGet<IntegrationStatus>("/api/integrations"),
+  });
+
+  const gmailConnected = data?.gmail?.connected ?? false;
+  const notionConnected = data?.notion?.connected ?? false;
+
+  const gmailStatus = gmailConnected ? "Connected" : "Not connected";
+  const notionStatus = notionConnected ? "Connected" : dbId.trim() ? "Ready to connect" : "Not connected";
+
+  const connectGmail = useMutation({
+    mutationFn: () => apiPost("/api/integrations/gmail/connect"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
+      toast({ title: "Gmail connected" });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message }),
+  });
+
+  const disconnectGmail = useMutation({
+    mutationFn: () => apiPost("/api/integrations/gmail/disconnect"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
+      toast({ title: "Gmail disconnected" });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message }),
+  });
+
+  const connectNotion = useMutation({
+    mutationFn: () => apiPost("/api/integrations/notion/connect", { databaseId: dbId }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
+      toast({ title: "Notion connected" });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message }),
+  });
+
+  const disconnectNotion = useMutation({
+    mutationFn: () => apiPost("/api/integrations/notion/disconnect"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
+      setDbId("");
+      toast({ title: "Notion disconnected" });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message }),
+  });
+
+  if (isLoading) {
+    return (
+      <AppShell title="Integrations" subtitle="Connect the tools your workflow already lives in.">
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className="glass p-6"><Skeleton className="h-40 w-full" /></Card>
+          <Card className="glass p-6"><Skeleton className="h-40 w-full" /></Card>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell title="Integrations" subtitle="Connect the tools your workflow already lives in.">
@@ -54,31 +113,29 @@ export default function IntegrationsPage() {
             </div>
             <Switch
               checked={gmailConnected}
-              onCheckedChange={(v) => setGmailConnected(v)}
+              onCheckedChange={(v) => {
+                if (v) connectGmail.mutate();
+                else disconnectGmail.mutate();
+              }}
               data-testid="switch-gmail"
             />
           </div>
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <Button
-              onClick={async () => {
-                await mockRequest(true, 650);
-                setGmailConnected(true);
-                toast({ title: "Gmail connected (mock)", description: "UI-only connection state." });
-              }}
+              onClick={() => connectGmail.mutate()}
+              disabled={connectGmail.isPending}
               data-testid="button-connect-gmail"
             >
-              Connect Gmail
+              {connectGmail.isPending ? "Connecting…" : "Connect Gmail"}
             </Button>
             <Button
               variant="secondary"
-              onClick={() => {
-                setGmailConnected(false);
-                toast({ title: "Disconnected", description: "UI-only state reset." });
-              }}
+              onClick={() => disconnectGmail.mutate()}
+              disabled={disconnectGmail.isPending}
               data-testid="button-disconnect-gmail"
             >
-              Disconnect
+              {disconnectGmail.isPending ? "Disconnecting…" : "Disconnect"}
             </Button>
           </div>
         </Card>
@@ -118,29 +175,25 @@ export default function IntegrationsPage() {
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             <Button
-              onClick={async () => {
+              onClick={() => {
                 if (!dbId.trim()) {
-                  toast({ title: "Add a Database ID", description: "This is required to connect (UI)." });
+                  toast({ title: "Add a Database ID", description: "This is required to connect." });
                   return;
                 }
-                await mockRequest(true, 650);
-                setNotionConnected(true);
-                toast({ title: "Notion connected (mock)", description: "UI-only connection state." });
+                connectNotion.mutate();
               }}
+              disabled={connectNotion.isPending}
               data-testid="button-connect-notion"
             >
-              Connect
+              {connectNotion.isPending ? "Connecting…" : "Connect"}
             </Button>
             <Button
               variant="secondary"
-              onClick={() => {
-                setNotionConnected(false);
-                setDbId("");
-                toast({ title: "Disconnected", description: "UI-only state reset." });
-              }}
+              onClick={() => disconnectNotion.mutate()}
+              disabled={disconnectNotion.isPending}
               data-testid="button-disconnect-notion"
             >
-              Disconnect
+              {disconnectNotion.isPending ? "Disconnecting…" : "Disconnect"}
             </Button>
           </div>
         </Card>
