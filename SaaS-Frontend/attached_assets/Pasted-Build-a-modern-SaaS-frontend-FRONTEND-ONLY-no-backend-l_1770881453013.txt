@@ -1,0 +1,270 @@
+Build a modern SaaS frontend (FRONTEND ONLY, no backend logic) for an AI-powered cold email automation platform.
+
+Tech stack:
+- Next.js (App Router)
+- TypeScript
+- Tailwind CSS
+- Clean, minimal SaaS UI
+- Dark/light/system default mode support
+- Responsive (mobile + desktop)
+
+Do NOT implement backend logic. Use mock data and placeholder API calls.
+
+---
+
+## Required Pages & Features
+
+### 1. Landing Page (Public)
+- Hero section (AI Cold Email Automation for Job Seekers)
+- Features section
+- Pricing section (Basic / Pro placeholder)
+- CTA buttons (Sign Up / Login)
+- Clean SaaS-style design
+
+---
+
+### 2. Authentication Pages
+- Login page
+- Signup page
+- Forgot password page
+- Google sign-in button (UI only, no real OAuth)
+
+---
+
+### 3. Dashboard (Home)
+- Cards:
+  - Emails Sent Today
+  - Follow-ups Pending
+  - Replies Received
+  - Daily Limit Progress Bar
+- “Start Automation” / “Pause Automation” toggle
+- Recent activity table (mock data)
+
+---
+
+### 4. Integrations Page
+Sections:
+- Gmail Connection
+  - “Connect Gmail” button
+  - Status badge (Connected / Not Connected)
+- Notion Connection
+  - Input field for Database ID
+  - Connect button
+  - Status indicator
+
+---
+
+### 5. Profile & AI Settings Page
+- Large text area for Full Profile Description
+- Skills input (tag-style input)
+- Target Roles input
+- Tone selector (Formal / Casual / Direct)
+- Custom Prompt Override text area
+- Resume Upload (drag & drop UI only)
+
+---
+
+### 6. Contacts Page
+- Upload CSV button
+- Add Contact modal
+- Table columns:
+  - Name
+  - Email
+  - Company
+  - Role
+  - Status
+  - Last Sent
+- Filters (All / Replied / Follow-up / Not Sent)
+- Bulk select UI
+
+---
+
+### 7. Campaign Settings Page
+- Daily Send Limit input
+- Number of Follow-ups selector
+- Follow-up Delay inputs (dynamic fields)
+- Priority Mode selector:
+  - Follow-ups First
+  - Fresh Emails First
+  - Balanced (Slider %)
+- Save Settings button
+
+---
+
+### 8. Analytics Page
+- Line chart (mock data)
+- Reply rate card
+- Total emails sent
+- Follow-up performance breakdown
+- Top subject lines (mock)
+
+---
+
+## Layout Requirements
+
+- Sidebar navigation (Dashboard, Contacts, Campaigns, Analytics, Integrations, Settings)
+- Top navbar with user dropdown
+- Clean modern SaaS UI (similar to Linear / Notion style)
+- Smooth transitions and animations
+- Loading states + empty states
+
+---
+
+Important:
+- Use mock JSON data
+- Simulate API calls
+- No real backend integration
+- Clean component structure
+- Production-ready UI structure
+
+This is a multi-tenant SaaS UI for email automation.
+Build clean, scalable frontend architecture.
+
+------
+
+Build a production-grade SaaS frontend (FRONTEND ONLY) for an AI-powered cold email automation platform.
+
+This must look like a real, funded startup product — clean, elegant, modern, trustworthy, and highly polished.
+
+Tech Requirements:
+- Next.js (App Router)
+- TypeScript
+- Tailwind CSS
+- Component-based architecture
+- Fully responsive (mobile + desktop)
+- Light theme (primary)
+- Dark mode optional
+- No backend logic — use mock data and simulated API calls
+
+Do NOT implement backend logic.
+
+---
+
+## Design Direction
+
+The UI must feel:
+
+- Premium
+- Clean
+- Minimal but powerful
+- Modern SaaS
+- Trustworthy
+- High-end startup quality
+
+Use a refined, professional light color palette that feels credible and safe for business software. Avoid loud or playful colors. Keep it elegant and balanced.
+
+Focus on:
+- Strong typography hierarchy
+- Clean spacing system
+- Subtle shadows
+- Soft gradients (if appropriate)
+- Smooth hover states
+- Micro-interactions
+- Button animations
+- Page transitions
+- Loading skeletons
+- Empty states
+- Toast notifications
+- Polished modals
+- Smooth sidebar transitions
+
+Make it feel alive but not flashy.
+
+---
+
+## Required Pages
+
+### 1. Landing Page
+- Hero section with strong value proposition
+- Feature highlights
+- Social proof section
+- Pricing preview
+- Clear CTAs (Sign Up / Login)
+- Elegant animations on scroll
+
+---
+
+### 2. Authentication Pages
+- Login
+- Signup
+- Forgot Password
+- Google Sign-in button (UI only)
+
+Clean card-based layout with subtle animations.
+
+---
+
+### 3. Dashboard
+- KPI cards (Emails Sent Today, Follow-ups Pending, Replies, Daily Limit Progress)
+- Progress visualization
+- Recent activity table
+- Start / Pause Automation toggle
+- Smooth animated counters
+
+---
+
+### 4. Contacts Page
+- Data table with filtering
+- Status badges
+- Search
+- Bulk selection
+- Add contact modal
+- Upload CSV button (UI only)
+
+---
+
+### 5. Campaign Settings Page
+- Daily send limit control
+- Follow-up customization controls
+- Priority mode selector (Follow-ups / Fresh / Balanced)
+- Clean form UI with validation states
+- Save changes button with feedback animation
+
+---
+
+### 6. Profile & AI Settings
+- Large profile context text area
+- Skills tag input
+- Target roles input
+- Tone selector
+- Custom prompt override
+- Resume upload (drag & drop UI)
+
+---
+
+### 7. Integrations Page
+- Gmail connect card
+- Notion connect card
+- Connection status indicators
+- Clear visual feedback for connected/disconnected states
+
+---
+
+### 8. Analytics Page
+- Clean charts (mock data)
+- Reply rate card
+- Performance metrics
+- Trend visualization
+
+---
+
+## Layout Requirements
+
+- Sidebar navigation (modern SaaS style)
+- Top navbar with user menu
+- Collapsible sidebar
+- Smooth transitions between pages
+- Consistent design system
+- Reusable UI components
+
+---
+
+## Important
+
+- Use realistic mock data
+- Simulate loading states
+- Structure the project cleanly
+- Follow production-level frontend architecture
+- Make it visually impressive
+
+This must look like a real SaaS startup ready for launch.

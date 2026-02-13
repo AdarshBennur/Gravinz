@@ -1,0 +1,435 @@
+import { useMemo, useState } from "react";
+import { UploadCloud, X, Plus, Trash2, Briefcase, Rocket } from "lucide-react";
+
+import AppShell from "@/components/app/app-shell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/hooks/use-toast";
+import { mockRequest } from "@/lib/mock-api";
+
+function TagInput({
+  label,
+  placeholder,
+  value,
+  onChange,
+  testId,
+}: {
+  label: string;
+  placeholder: string;
+  value: string[];
+  onChange: (tags: string[]) => void;
+  testId: string;
+}) {
+  const [text, setText] = useState("");
+
+  return (
+    <div className="grid gap-2">
+      <Label data-testid={`label-${testId}`}>{label}</Label>
+      <div className="flex flex-wrap gap-2 rounded-xl border bg-background/60 p-2" data-testid={`input-${testId}`}>
+        {value.map((t) => (
+          <Badge
+            key={t}
+            variant="secondary"
+            className="rounded-full gap-1"
+            data-testid={`tag-${testId}-${t}`}
+          >
+            {t}
+            <button
+              className="ml-1 inline-flex rounded-full p-0.5 hover:bg-background"
+              onClick={() => onChange(value.filter((x) => x !== t))}
+              data-testid={`button-remove-${testId}-${t}`}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </Badge>
+        ))}
+        <input
+          className="min-w-[160px] flex-1 bg-transparent px-2 py-1 text-sm outline-none"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              const next = text
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+              if (next.length) onChange([...value, ...next]);
+              setText("");
+            }
+            if (e.key === "Backspace" && !text && value.length) {
+              onChange(value.slice(0, -1));
+            }
+          }}
+          placeholder={placeholder}
+          data-testid={`input-${testId}-text`}
+        />
+      </div>
+      <div className="text-xs text-muted-foreground" data-testid={`help-${testId}`}>
+        Press Enter to add a tag
+      </div>
+    </div>
+  );
+}
+
+interface Experience {
+  id: string;
+  role: string;
+  company: string;
+  duration: string;
+  description: string;
+}
+
+interface Project {
+  id: string;
+  name: string;
+  tech: string;
+  impact: string;
+}
+
+export default function ProfileSettingsPage() {
+  const { toast } = useToast();
+  const [skills, setSkills] = useState(["React", "TypeScript", "Analytics"]);
+  const [roles, setRoles] = useState(["Frontend Engineer", "Product Engineer"]);
+  const [tone, setTone] = useState("direct");
+  const [status, setStatus] = useState("working");
+
+  const [experiences, setExperiences] = useState<Experience[]>([
+    {
+      id: "1",
+      role: "Senior Frontend Engineer",
+      company: "TechCorp",
+      duration: "Jan 2022 - Present",
+      description: "Leading the UI platform team, building accessible design systems and scalable React applications.",
+    },
+  ]);
+
+  const [projects, setProjects] = useState<Project[]>([
+    {
+      id: "1",
+      name: "OutboundAI",
+      tech: "React, TypeScript, Tailwind",
+      impact: "Automated cold outreach for 10k+ users, increasing response rates by 40%.",
+    },
+    {
+      id: "2",
+      name: "DesignSystem UI",
+      tech: "Storybook, Radix, CSS",
+      impact: "Reduced design-to-dev handoff time by 50% across 3 internal teams.",
+    },
+    {
+      id: "3",
+      name: "DataViz Pro",
+      tech: "D3.js, React, Node",
+      impact: "Real-time analytics dashboard used by executive leadership for strategic decisions.",
+    },
+  ]);
+
+  const [dragOver, setDragOver] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
+
+  const profilePlaceholder = useMemo(
+    () =>
+      "I’m a product-minded engineer with experience shipping React + TypeScript apps. I’m looking for roles that value craft, speed, and collaboration. I prefer teams that ship often and write clearly.",
+    [],
+  );
+
+  const addExperience = () => {
+    setExperiences([
+      ...experiences,
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        role: "",
+        company: "",
+        duration: "",
+        description: "",
+      },
+    ]);
+  };
+
+  const updateExperience = (id: string, field: keyof Experience, val: string) => {
+    setExperiences(experiences.map((exp) => (exp.id === id ? { ...exp, [field]: val } : exp)));
+  };
+
+  const removeExperience = (id: string) => {
+    setExperiences(experiences.filter((exp) => exp.id !== id));
+  };
+
+  const updateProject = (id: string, field: keyof Project, val: string) => {
+    setProjects(projects.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
+  };
+
+  return (
+    <AppShell title="Profile & AI Settings" subtitle="Give the AI context so it can write in your voice.">
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="lg:col-span-2 space-y-6">
+          <Card className="glass p-6" data-testid="card-profile">
+            <div className="grid gap-5">
+              <div className="grid gap-2">
+                <Label data-testid="label-status">Current Status</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger className="w-full" data-testid="select-status">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="student">Student</SelectItem>
+                    <SelectItem value="working">Working Professional</SelectItem>
+                    <SelectItem value="switcher">Career Switcher</SelectItem>
+                    <SelectItem value="freelancer">Freelancer</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="profile" data-testid="label-profile">Full profile description</Label>
+                <Textarea
+                  id="profile"
+                  defaultValue={profilePlaceholder}
+                  className="min-h-40"
+                  data-testid="textarea-profile"
+                />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <TagInput
+                  label="Skills"
+                  placeholder="Add a skill…"
+                  value={skills}
+                  onChange={setSkills}
+                  testId="skills"
+                />
+                <TagInput
+                  label="Target roles"
+                  placeholder="Add a role…"
+                  value={roles}
+                  onChange={setRoles}
+                  testId="roles"
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label data-testid="label-tone">Tone</Label>
+                <Select value={tone} onValueChange={setTone}>
+                  <SelectTrigger className="w-full" data-testid="select-tone">
+                    <SelectValue placeholder="Select tone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="formal" data-testid="option-tone-formal">Formal</SelectItem>
+                    <SelectItem value="casual" data-testid="option-tone-casual">Casual</SelectItem>
+                    <SelectItem value="direct" data-testid="option-tone-direct">Direct</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="glass p-6" data-testid="card-experience">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-5 w-5 text-primary" />
+                <h2 className="text-lg font-semibold">Professional Experience</h2>
+              </div>
+              <Button onClick={addExperience} size="sm" variant="secondary">
+                <Plus className="h-4 w-4 mr-2" /> Add Experience
+              </Button>
+            </div>
+
+            <div className="space-y-4">
+              {experiences.map((exp) => (
+                <Card key={exp.id} className="p-4 bg-background/40 relative group">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => removeExperience(exp.id)}
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                  <div className="grid gap-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label>Role / Job Title</Label>
+                        <Input
+                          value={exp.role}
+                          onChange={(e) => updateExperience(exp.id, "role", e.target.value)}
+                          placeholder="e.g. Software Engineer"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Company Name</Label>
+                        <Input
+                          value={exp.company}
+                          onChange={(e) => updateExperience(exp.id, "company", e.target.value)}
+                          placeholder="e.g. Acme Inc"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Duration</Label>
+                      <Input
+                        value={exp.duration}
+                        onChange={(e) => updateExperience(exp.id, "duration", e.target.value)}
+                        placeholder="e.g. Jan 2020 - Present"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Description</Label>
+                      <Textarea
+                        value={exp.description}
+                        onChange={(e) => updateExperience(exp.id, "description", e.target.value)}
+                        placeholder="Short description of your impact..."
+                        className="min-h-[100px]"
+                      />
+                    </div>
+                  </div>
+                </Card>
+              ))}
+              {experiences.length === 0 && (
+                <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-xl">
+                  No experience added yet.
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card className="glass p-6" data-testid="card-projects">
+            <div className="flex items-center gap-2 mb-6">
+              <Rocket className="h-5 w-5 text-primary" />
+              <h2 className="text-lg font-semibold">Top 3 Highlight Projects</h2>
+            </div>
+            <div className="grid gap-4">
+              {projects.map((p) => (
+                <Card key={p.id} className="p-4 bg-background/40">
+                  <div className="grid gap-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="grid gap-2">
+                        <Label>Project Name</Label>
+                        <Input
+                          value={p.name}
+                          onChange={(e) => updateProject(p.id, "name", e.target.value)}
+                          placeholder="Project name"
+                        />
+                      </div>
+                      <div className="grid gap-2">
+                        <Label>Tech Stack</Label>
+                        <Input
+                          value={p.tech}
+                          onChange={(e) => updateProject(p.id, "tech", e.target.value)}
+                          placeholder="React, Node.js..."
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Impact Description</Label>
+                      <Input
+                        value={p.impact}
+                        onChange={(e) => updateProject(p.id, "impact", e.target.value)}
+                        placeholder="1-2 line impact description"
+                      />
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <Card className="glass p-6" data-testid="card-resume">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold" data-testid="text-resume-title">Resume upload</div>
+                <div className="text-xs text-muted-foreground" data-testid="text-resume-sub">
+                  Drag & drop (UI only)
+                </div>
+              </div>
+              {fileName ? (
+                <Badge variant="secondary" className="rounded-full">Added</Badge>
+              ) : (
+                <Badge variant="secondary" className="rounded-full">Optional</Badge>
+              )}
+            </div>
+
+            <div
+              className={
+                "mt-5 grid place-items-center rounded-xl border bg-background/60 p-6 text-center transition-colors " +
+                (dragOver ? "bg-primary/5 border-primary/40" : "")
+              }
+              onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOver(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) setFileName(file.name);
+              }}
+              data-testid="dropzone-resume"
+            >
+              <UploadCloud className="h-6 w-6 text-muted-foreground" />
+              <div className="mt-2 text-sm font-medium">Drop your resume here</div>
+              <div className="mt-1 text-xs text-muted-foreground">PDF, DOCX</div>
+
+              <div className="mt-4 flex w-full flex-col gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setFileName("resume.pdf");
+                    toast({ title: "Added resume (mock)", description: "Stored locally in UI state." });
+                  }}
+                >
+                  Choose file
+                </Button>
+                {fileName && (
+                  <Button variant="ghost" onClick={() => setFileName(null)}>Remove</Button>
+                )}
+                {fileName && <div className="text-xs text-muted-foreground">{fileName}</div>}
+              </div>
+            </div>
+          </Card>
+
+          <Card className="glass p-6" data-testid="card-ai-override">
+            <div className="grid gap-2">
+              <Label htmlFor="prompt" data-testid="label-prompt">Custom prompt override</Label>
+              <Textarea
+                id="prompt"
+                className="min-h-32"
+                placeholder="Optional: override system prompt for generation…"
+                data-testid="textarea-prompt"
+              />
+            </div>
+          </Card>
+
+          <div className="flex flex-col gap-2">
+            <Button
+              className="w-full shadow-lg shadow-primary/20"
+              size="lg"
+              onClick={async () => {
+                await mockRequest(true, 650);
+                toast({ title: "Saved", description: "All settings saved successfully." });
+              }}
+              data-testid="button-save-all"
+            >
+              Save All Changes
+            </Button>
+            <Button
+              variant="secondary"
+              className="w-full"
+              size="lg"
+              onClick={() => toast({ title: "Reset", description: "Changes discarded." })}
+            >
+              Discard Changes
+            </Button>
+          </div>
+        </div>
+      </div>
+    </AppShell>
+  );
+}
