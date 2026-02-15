@@ -135,8 +135,44 @@ The API routes include a mapping layer to reconcile database column names with f
 - **drizzle-kit** — Database migration tooling
 - **@replit/vite-plugin-runtime-error-modal** — Error overlay in development
 
+### Automation & Services
+- **node-cron** — Scheduler for automated email sending (5-min cycles) and reply checking (10-min cycles)
+- **multer** — File upload middleware for CSV imports
+- **googleapis** — Gmail API integration (OAuth2, send, reply detection)
+- **@notionhq/client** — Notion API integration (OAuth2, contact import, status sync)
+- **csv-parse** — CSV file parsing for contact imports
+
+## Services Architecture
+```
+SaaS-Frontend/server/services/
+├── gmail.ts           # Gmail OAuth2 flow, email sending, reply detection, token refresh
+├── notion.ts          # Notion OAuth2 flow, contact import from databases, status sync-back
+├── email-generator.ts # AI email generation with context memory, follow-up awareness, fallback
+└── automation.ts      # node-cron scheduler with daily limits, priority modes, concurrency locks
+```
+
+### Automation Engine
+- **Send cycle**: Runs every 5 minutes, processes active users, respects daily limits
+- **Reply check**: Runs every 10 minutes, detects replies via Gmail API, updates contact status
+- **Priority modes**: followups-first, fresh-first, balanced (configurable ratio)
+- **Follow-up logic**: Configurable delays per follow-up (default: 2 days, 4 days)
+- **Concurrency**: Locks prevent overlapping cycles
+- **Email validation**: Contacts with invalid emails are skipped
+
+### OAuth Integrations
+- Gmail: OAuth2 flow → send emails via Gmail API, detect replies by threadId
+- Notion: OAuth2 flow → import contacts from Notion databases, sync status changes back
+- Both require client ID/secret environment variables (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, NOTION_CLIENT_ID, NOTION_CLIENT_SECRET)
+
 ## Recent Changes
 - 2026-02-13: Built full production backend with PostgreSQL database, authentication, 30+ API endpoints
 - 2026-02-13: Connected all 7 frontend pages to real backend APIs (replaced all mock data)
 - 2026-02-13: Added field name mapping layer between database schema and frontend expectations
 - 2026-02-13: Implemented AI email generation with intelligent fallback (no API key required)
+- 2026-02-15: Added CSV contact import with validation, deduplication, and error reporting
+- 2026-02-15: Built Gmail OAuth service with email sending and reply detection
+- 2026-02-15: Built Notion OAuth service with contact import and status sync-back
+- 2026-02-15: Enhanced AI email generator with context memory and follow-up awareness
+- 2026-02-15: Built automation engine with node-cron scheduler, daily limits, priority modes
+- 2026-02-15: Fixed security: secure session cookies in production, concurrency locks, email validation
+- 2026-02-15: Updated frontend with CSV upload dialog, OAuth redirect flows, Notion import UI
