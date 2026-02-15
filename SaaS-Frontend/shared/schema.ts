@@ -16,8 +16,11 @@ export const contactStatusEnum = pgEnum("contact_status", [
   "not-sent",
   "sent",
   "followup",
+  "followup-1",
+  "followup-2",
   "replied",
   "bounced",
+  "paused",
 ]);
 
 export const automationStatusEnum = pgEnum("automation_status", [
@@ -120,6 +123,10 @@ export const contacts = pgTable("contacts", {
   role: text("role"),
   status: contactStatusEnum("status").default("not-sent"),
   lastSentAt: timestamp("last_sent_at"),
+  notionPageId: text("notion_page_id"),
+  source: text("source").default("manual"),
+  followupsSent: integer("followups_sent").default(0),
+  notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

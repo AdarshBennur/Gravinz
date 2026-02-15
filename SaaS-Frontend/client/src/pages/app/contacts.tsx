@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Plus, Upload, Trash2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Plus, Upload, Trash2, FileText } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
@@ -18,7 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiGet, apiPost, apiDelete } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 
-type ContactStatus = "replied" | "followup" | "not-sent";
+type ContactStatus = "replied" | "followup" | "followup-1" | "followup-2" | "not-sent" | "sent" | "bounced" | "paused";
 
 type Contact = {
   id: string;
@@ -28,18 +28,35 @@ type Contact = {
   role: string;
   status: ContactStatus;
   lastSentAt: string | null;
+  source?: string;
+  followupsSent?: number;
 };
 
-const statusLabel: Record<ContactStatus, string> = {
+const statusLabel: Record<string, string> = {
   replied: "Replied",
   followup: "Follow-up",
+  "followup-1": "Follow-up 1",
+  "followup-2": "Follow-up 2",
   "not-sent": "Not sent",
+  sent: "Sent",
+  bounced: "Bounced",
+  paused: "Paused",
+};
+
+const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  replied: "default",
+  sent: "secondary",
+  followup: "secondary",
+  "followup-1": "secondary",
+  "followup-2": "secondary",
+  "not-sent": "outline",
+  bounced: "destructive",
+  paused: "outline",
 };
 
 function StatusBadge({ status }: { status: ContactStatus }) {
-  const variant = status === "replied" ? "default" : "secondary";
   return (
-    <Badge variant={variant} className="rounded-full" data-testid={`status-contact-${status}`}>
+    <Badge variant={statusVariant[status] || "secondary"} className="rounded-full" data-testid={`status-contact-${status}`}>
       {statusLabel[status] ?? status}
     </Badge>
   );
@@ -56,10 +73,13 @@ function formatDate(dateStr: string | null): string {
 
 export default function ContactsPage() {
   const { toast } = useToast();
-  const [filter, setFilter] = useState<"all" | ContactStatus>("all");
+  const [filter, setFilter] = useState<"all" | string>("all");
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [open, setOpen] = useState(false);
+  const [csvOpen, setCsvOpen] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({ name: "", email: "", company: "", role: "", status: "not-sent" as ContactStatus });
 
   const { data: contacts = [], isLoading } = useQuery<Contact[]>({
@@ -91,6 +111,33 @@ export default function ContactsPage() {
     },
   });
 
+  const csvUploadMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/contacts/import-csv", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ message: "Upload failed" }));
+        throw new Error(data.message || "Upload failed");
+      }
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      const msg = `Imported ${data.imported} contacts${data.skipped ? `, ${data.skipped} skipped` : ""}`;
+      toast({ title: "CSV Import Complete", description: msg });
+      setCsvOpen(false);
+      setCsvFile(null);
+    },
+    onError: (err: Error) => {
+      toast({ title: "Import Error", description: err.message });
+    },
+  });
+
   const filtered = useMemo(() => {
     return contacts
       .filter((c) => (filter === "all" ? true : c.status === filter))
@@ -98,10 +145,10 @@ export default function ContactsPage() {
         if (!query.trim()) return true;
         const q = query.toLowerCase();
         return (
-          c.name.toLowerCase().includes(q) ||
-          c.email.toLowerCase().includes(q) ||
-          c.company.toLowerCase().includes(q) ||
-          c.role.toLowerCase().includes(q)
+          c.name?.toLowerCase().includes(q) ||
+          c.email?.toLowerCase().includes(q) ||
+          c.company?.toLowerCase().includes(q) ||
+          c.role?.toLowerCase().includes(q)
         );
       });
   }, [contacts, filter, query]);
@@ -115,14 +162,63 @@ export default function ContactsPage() {
       subtitle="Import contacts, track status, and manage follow-ups."
       headerRight={
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <Button
-            variant="secondary"
-            onClick={() => toast({ title: "Upload CSV", description: "CSV import coming soon." })}
-            data-testid="button-upload-csv"
-          >
-            <Upload className="mr-2 h-4 w-4" />
-            Upload CSV
-          </Button>
+          <Dialog open={csvOpen} onOpenChange={setCsvOpen}>
+            <DialogTrigger asChild>
+              <Button
+                variant="secondary"
+                data-testid="button-upload-csv"
+              >
+                <Upload className="mr-2 h-4 w-4" />
+                Upload CSV
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-lg" data-testid="modal-upload-csv">
+              <DialogHeader>
+                <DialogTitle>Import contacts from CSV</DialogTitle>
+              </DialogHeader>
+
+              <div className="grid gap-4">
+                <div className="text-sm text-muted-foreground">
+                  Upload a CSV file with columns: <strong>Name</strong>, <strong>Email</strong>, Company, Role.
+                  Name and Email are required.
+                </div>
+
+                <div
+                  className="flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed bg-background/60 p-8 cursor-pointer hover:border-primary/50 transition-colors"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <FileText className="h-8 w-8 text-muted-foreground" />
+                  {csvFile ? (
+                    <div className="text-sm font-medium">{csvFile.name}</div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">Click to select a CSV file</div>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) setCsvFile(file);
+                    }}
+                  />
+                </div>
+              </div>
+
+              <DialogFooter>
+                <Button variant="secondary" onClick={() => { setCsvOpen(false); setCsvFile(null); }}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={() => { if (csvFile) csvUploadMutation.mutate(csvFile); }}
+                  disabled={!csvFile || csvUploadMutation.isPending}
+                >
+                  {csvUploadMutation.isPending ? "Importing..." : "Import"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
@@ -212,7 +308,7 @@ export default function ContactsPage() {
                   disabled={addMutation.isPending}
                   data-testid="button-confirm-add-contact"
                 >
-                  {addMutation.isPending ? "Adding…" : "Add"}
+                  {addMutation.isPending ? "Adding..." : "Add"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -226,7 +322,7 @@ export default function ContactsPage() {
             <div className="flex items-center gap-3">
               <Input
                 type="search"
-                placeholder="Search contacts…"
+                placeholder="Search contacts..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="w-full sm:w-72"
@@ -243,7 +339,7 @@ export default function ContactsPage() {
               <TabsList>
                 <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
                 <TabsTrigger value="replied" data-testid="tab-replied">Replied</TabsTrigger>
-                <TabsTrigger value="followup" data-testid="tab-followup">Follow-up</TabsTrigger>
+                <TabsTrigger value="sent" data-testid="tab-sent">Sent</TabsTrigger>
                 <TabsTrigger value="not-sent" data-testid="tab-not-sent">Not sent</TabsTrigger>
               </TabsList>
             </Tabs>

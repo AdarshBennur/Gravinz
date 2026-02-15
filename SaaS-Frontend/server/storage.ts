@@ -59,6 +59,7 @@ export interface IStorage {
   upsertCampaignSettings(userId: string, data: InsertCampaignSettings): Promise<CampaignSettings>;
 
   getEmailSends(userId: string, limit?: number): Promise<EmailSend[]>;
+  getEmailSendsForContact(userId: string, contactId: string): Promise<EmailSend[]>;
   createEmailSend(userId: string, contactId: string, data: Partial<EmailSend>): Promise<EmailSend>;
   updateEmailSend(id: string, data: Partial<EmailSend>): Promise<EmailSend | undefined>;
 
@@ -70,6 +71,8 @@ export interface IStorage {
 
   getActivityLog(userId: string, limit?: number): Promise<ActivityLogEntry[]>;
   createActivityLog(userId: string, data: { contactName?: string; action: string; status?: string }): Promise<ActivityLogEntry>;
+
+  getUsersWithActiveAutomation(): Promise<string[]>;
 
   getDashboardStats(userId: string): Promise<{
     sentToday: number;
@@ -254,6 +257,14 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  async getEmailSendsForContact(userId: string, contactId: string): Promise<EmailSend[]> {
+    return db
+      .select()
+      .from(emailSends)
+      .where(and(eq(emailSends.userId, userId), eq(emailSends.contactId, contactId)))
+      .orderBy(emailSends.createdAt);
+  }
+
   async createEmailSend(userId: string, contactId: string, data: Partial<EmailSend>): Promise<EmailSend> {
     const [send] = await db
       .insert(emailSends)
@@ -379,6 +390,14 @@ export class DatabaseStorage implements IStorage {
     const replyRate = totalSent > 0 ? Math.round((totalReplies / totalSent) * 100) : 0;
 
     return { daily, totalSent, totalReplies, replyRate };
+  }
+
+  async getUsersWithActiveAutomation(): Promise<string[]> {
+    const results = await db
+      .select({ userId: campaignSettings.userId })
+      .from(campaignSettings)
+      .where(eq(campaignSettings.automationStatus, "running"));
+    return results.map((r) => r.userId);
   }
 }
 
