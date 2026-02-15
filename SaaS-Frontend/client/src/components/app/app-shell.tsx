@@ -3,6 +3,7 @@ import {
   BarChart3,
   Compass,
   Contact2,
+  Inbox,
   Plug,
   Settings,
   SlidersHorizontal,
@@ -32,6 +33,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 const nav = [
   { href: "/app/dashboard", label: "Dashboard", icon: Compass, testId: "nav-dashboard" },
   { href: "/app/contacts", label: "Contacts", icon: Contact2, testId: "nav-contacts" },
+  { href: "/app/inbox", label: "Inbox", icon: Inbox, testId: "nav-inbox" },
   { href: "/app/campaigns", label: "Campaigns", icon: SlidersHorizontal, testId: "nav-campaigns" },
   { href: "/app/analytics", label: "Analytics", icon: BarChart3, testId: "nav-analytics" },
   { href: "/app/integrations", label: "Integrations", icon: Plug, testId: "nav-integrations" },

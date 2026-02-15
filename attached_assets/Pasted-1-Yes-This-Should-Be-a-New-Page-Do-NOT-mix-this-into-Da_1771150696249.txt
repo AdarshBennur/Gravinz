@@ -1,0 +1,147 @@
+1️⃣ Yes — This Should Be a New Page
+
+Do NOT mix this into Dashboard or Contacts.
+
+Create a dedicated page:
+
+Inbox or Conversations
+
+Just like:
+	•	Gmail
+	•	Linear comments
+	•	CRM inbox
+	•	Sales tools (Apollo, Instantly, Lemlist)
+
+This becomes your command center.
+
+⸻
+
+2️⃣ Layout Structure (Correct Way)
+
+You were thinking correctly.
+
+Use a 3-column layout:
+
+LEFT SIDEBAR
+	•	Contact name
+	•	Company
+	•	Status (Not Applied / First Email / Follow-up / Replied)
+	•	Last message preview
+	•	Unread badge
+	•	Open rate icon
+	•	Reply icon
+
+⸻
+
+MIDDLE PANEL
+
+Full conversation thread:
+	•	Sent emails
+	•	Follow-ups
+	•	Replies
+	•	Timestamps
+	•	Delivery / Open indicators
+	•	Clean email-style UI
+
+Looks like Gmail thread view.
+
+⸻
+
+RIGHT PANEL (Optional but powerful)
+	•	Contact details
+	•	Campaign info
+	•	Email analytics:
+	•	Delivered
+	•	Opened
+	•	Clicked
+	•	Reply time
+
+⸻
+
+3️⃣ Email Tracking — Reality Check
+
+Now important part.
+
+You can track:
+
+✅ Delivered (SMTP success)
+✅ Opened (Tracking pixel)
+✅ Link Clicks (Redirect tracking link)
+✅ Replies (Gmail webhook / polling)
+
+You CANNOT reliably track:
+❌ “Read” (Open ≠ Read)
+
+Email tracking works like this:
+	•	Add invisible pixel image in email
+	•	Add tracked redirect links
+	•	Store events in DB
+	•	Update status
+
+⸻
+
+4️⃣ Architecture You Need
+
+To support this, your system must:
+	•	Store every sent email body in DB
+	•	Store message ID from Gmail API
+	•	Store thread ID
+	•	Sync replies via:
+	•	Gmail push notifications (watch API)
+	•	OR polling every X minutes
+
+Without this, follow-ups will never be intelligent.
+
+⸻
+
+5️⃣ Should This Be a Separate Feature?
+
+Yes.
+
+Add a new page:
+
+/inbox
+or
+/conversations
+
+This becomes:
+	•	Email thread viewer
+	•	Tracking dashboard
+	•	Reply manager
+	•	Status updater
+
+⸻
+
+6️⃣ Where Tracking Metrics Should Live
+
+Tracking summary:
+	•	Show per contact (inside Inbox)
+	•	Show aggregated metrics in Analytics page
+
+Do NOT clutter Dashboard.
+
+⸻
+
+7️⃣ Product Advice (Brutal Truth)
+
+If you build:
+	•	Gmail sending
+	•	Thread storage
+	•	Reply sync
+	•	Tracking
+	•	Notion sync
+	•	Automation scheduler
+
+You are no longer building a small SaaS.
+
+You are building:
+
+A full cold-email automation platform.
+
+Which is:
+	•	Infrastructure heavy
+	•	Webhook heavy
+	•	Async job heavy
+	•	Database design heavy
+
+So architect properly now or you’ll rebuild everything later.

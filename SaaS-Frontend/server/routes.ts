@@ -894,6 +894,123 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/inbox/threads", requireAuth, async (req, res) => {
+    try {
+      const userId = getSessionUserId(req)!;
+      const search = (req.query.search as string || "").toLowerCase();
+      const allContacts = await storage.getContacts(userId);
+      const allSends = await storage.getEmailSends(userId, 10000);
+
+      const sendsByContact = new Map<string, typeof allSends>();
+      for (const send of allSends) {
+        const arr = sendsByContact.get(send.contactId) || [];
+        arr.push(send);
+        sendsByContact.set(send.contactId, arr);
+      }
+
+      const threads = allContacts
+        .filter((c) => {
+          if (!search) return true;
+          return (
+            c.name?.toLowerCase().includes(search) ||
+            c.email?.toLowerCase().includes(search) ||
+            c.company?.toLowerCase().includes(search)
+          );
+        })
+        .map((contact) => {
+          const sends = sendsByContact.get(contact.id) || [];
+          const latestSend = sends.length > 0 ? sends[sends.length - 1] : null;
+          const hasReply = sends.some((s) => s.status === "replied" || s.repliedAt);
+          const delivered = sends.filter((s) => s.status === "sent" || s.status === "delivered" || s.status === "opened" || s.status === "replied").length;
+          const opened = sends.filter((s) => s.status === "opened" || s.status === "replied" || s.openedAt).length;
+          const replied = sends.filter((s) => s.status === "replied" || s.repliedAt).length;
+
+          return {
+            contactId: contact.id,
+            name: contact.name,
+            email: contact.email,
+            company: contact.company,
+            role: contact.role,
+            status: contact.status,
+            source: contact.source,
+            lastMessage: latestSend
+              ? {
+                  subject: latestSend.subject,
+                  bodyPreview: (latestSend.body || "").substring(0, 100),
+                  sentAt: latestSend.sentAt,
+                  status: latestSend.status,
+                  followupNumber: latestSend.followupNumber,
+                }
+              : null,
+            unread: hasReply && contact.status === "replied",
+            messageCount: sends.length,
+            analytics: { delivered, opened, replied },
+          };
+        })
+        .sort((a, b) => {
+          if (a.unread && !b.unread) return -1;
+          if (!a.unread && b.unread) return 1;
+          const aTime = a.lastMessage?.sentAt ? new Date(a.lastMessage.sentAt).getTime() : 0;
+          const bTime = b.lastMessage?.sentAt ? new Date(b.lastMessage.sentAt).getTime() : 0;
+          return bTime - aTime;
+        });
+
+      res.json(threads);
+    } catch (error: any) {
+      console.error("Inbox threads error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.get("/api/inbox/threads/:contactId", requireAuth, async (req, res) => {
+    try {
+      const userId = getSessionUserId(req)!;
+      const contactId = req.params.contactId;
+      const contact = await storage.getContact(contactId, userId);
+      if (!contact) {
+        return res.status(404).json({ message: "Contact not found" });
+      }
+
+      const sends = await storage.getEmailSendsForContact(userId, contactId);
+      const delivered = sends.filter((s) => s.status === "sent" || s.status === "delivered" || s.status === "opened" || s.status === "replied").length;
+      const opened = sends.filter((s) => s.status === "opened" || s.status === "replied" || s.openedAt).length;
+      const replied = sends.filter((s) => s.status === "replied" || s.repliedAt).length;
+
+      const thread = sends.map((s) => ({
+        id: s.id,
+        subject: s.subject,
+        body: s.body,
+        status: s.status,
+        followupNumber: s.followupNumber,
+        sentAt: s.sentAt,
+        openedAt: s.openedAt,
+        repliedAt: s.repliedAt,
+        gmailThreadId: s.gmailThreadId,
+        direction: "outbound" as const,
+      }));
+
+      res.json({
+        contact: {
+          id: contact.id,
+          name: contact.name,
+          email: contact.email,
+          company: contact.company,
+          role: contact.role,
+          status: contact.status,
+          source: contact.source,
+          followupsSent: contact.followupsSent,
+          lastSentAt: contact.lastSentAt,
+          createdAt: contact.createdAt,
+        },
+        thread,
+        analytics: { delivered, opened, replied, total: sends.length },
+      });
+    } catch (error: any) {
+      console.error("Inbox thread detail error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/email-sends", requireAuth, async (req, res) => {
     try {
       const userId = getSessionUserId(req)!;
