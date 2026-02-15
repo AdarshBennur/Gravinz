@@ -1,0 +1,264 @@
+FULL SYSTEM IMPLEMENTATION
+
+You are building a production-grade AI-powered cold email automation SaaS platform.
+
+This is NOT a mock app. All flows must function correctly end-to-end.
+
+The platform must behave like a real automation engine with real integrations.
+
+⸻
+
+🚀 CORE USER FLOW
+
+1️⃣ CONTACTS PAGE – CSV IMPORT (REAL FUNCTIONALITY)
+
+When user uploads a CSV:
+	•	Parse CSV file properly
+	•	Validate required fields (Name, Email, Company, Role)
+	•	Insert contacts into database
+	•	Immediately render them inside the existing contacts table
+	•	Default status = “Not Applied”
+
+Automation must only send first emails to contacts with status:
+
+“Not Applied”
+
+Status must update automatically after actions.
+
+⸻
+
+2️⃣ CAMPAIGNS PAGE – AUTOMATION CONTROL ENGINE
+
+Campaign Settings must include:
+	•	Daily Send Limit
+	•	Number of Follow-Ups
+	•	Follow-Up Delay (dynamic per follow-up)
+	•	Priority Mode:
+	•	Follow-Ups First
+	•	Fresh Emails First
+	•	Balanced (ratio-based blending)
+	•	Automation Start Time (NEW FEATURE)
+
+Automation Behavior
+	•	Automation must start exactly at the selected time.
+	•	Stop after daily send limit reached.
+	•	Resume next day automatically at selected time.
+	•	Respect priority mode logic.
+	•	Skip contacts marked:
+	•	Replied
+	•	Bounced
+	•	Paused
+
+Follow-ups must:
+	•	Only be sent if previous email exists
+	•	Respect configured delay
+	•	Use prior email context
+
+No follow-ups for replied contacts.
+
+⸻
+
+3️⃣ GMAIL INTEGRATION – REAL OAUTH FLOW
+
+The current “Connect Gmail” button is fake.
+
+This must be replaced with real Google OAuth 2.0.
+
+Correct Flow:
+	1.	User clicks “Connect Gmail”
+	2.	Redirect to Google OAuth consent screen
+	3.	Request proper scopes:
+	•	Send email
+	•	Read message metadata
+	•	Read threads
+	4.	After authorization:
+	•	Store encrypted access token
+	•	Store refresh token
+	•	Store expiry
+	5.	Mark integration = Connected only after real success
+
+Sending Emails
+	•	Send via Gmail API
+	•	Store:
+	•	Email subject
+	•	Body
+	•	Message ID
+	•	Thread ID
+	•	Timestamp
+
+Reply Detection
+	•	Periodically check Gmail threads
+	•	If reply detected:
+	•	Update status = Replied
+	•	Cancel future follow-ups
+
+System must use thread ID for follow-ups to preserve context.
+
+⸻
+
+4️⃣ NOTION INTEGRATION – REAL OAUTH FLOW
+
+Current logic (enter database ID + show connected) is wrong.
+
+Correct approach:
+
+Proper Notion Integration Flow
+	1.	User clicks “Connect Notion”
+	2.	Redirect to Notion OAuth authorization
+	3.	User selects workspace
+	4.	Store secure access token
+	5.	After connection:
+	•	Fetch list of databases
+	•	Allow user to select database from dropdown
+	•	NOT manually paste database ID
+
+Only after successful OAuth should integration show “Connected”.
+
+⸻
+
+5️⃣ NOTION SYNC LOGIC
+
+If contacts were imported from Notion:
+	•	Store Notion page ID reference
+	•	When status changes in platform:
+	•	Update Notion page property automatically
+
+Examples:
+	•	First email sent → “First Email Sent”
+	•	Follow-Up 1 → “Follow-Up 1”
+	•	Replied → “Replied”
+
+Platform is source of truth.
+
+Status must sync:
+	•	In Contacts page
+	•	In Notion database
+
+⸻
+
+6️⃣ SETTINGS PAGE – FULL AI CONTEXT
+
+AI must use:
+	•	Full Profile Description
+	•	Skills
+	•	Target Roles
+	•	Tone
+	•	Professional Experience entries
+	•	Highlight Projects
+	•	Resume content
+	•	Custom Prompt override
+
+All must be saved and retrievable.
+
+When generating emails:
+	•	Combine user profile context
+	•	Combine recipient company + role
+	•	Light company research before generating email
+
+Emails must feel:
+	•	Personalized
+	•	Context-aware
+	•	Non-generic
+	•	Professional
+
+⸻
+
+7️⃣ CONTEXT MEMORY ENGINE
+
+System must store:
+	•	All sent emails
+	•	All thread IDs
+	•	All timestamps
+
+When generating follow-up:
+	•	Pass previous email content into AI
+	•	Maintain continuity
+	•	Avoid disconnected messaging
+
+⸻
+
+8️⃣ STATUS RULES (CRITICAL LOGIC)
+
+Automation must:
+	•	Send first emails only to “Not Applied”
+	•	Send follow-ups only to:
+	•	“First Email Sent”
+	•	“Follow-Up 1”
+	•	etc.
+
+Never send follow-ups to:
+	•	Replied
+	•	Bounced
+
+Status must auto-update after each action.
+
+⸻
+
+9️⃣ SYSTEM EXPECTATIONS
+	•	Secure token storage
+	•	Background job scheduler
+	•	Daily automation cycle
+	•	Clean modular architecture
+	•	No fake UI-only logic
+	•	No simulated integrations
+
+Everything must function end-to-end.
+
+⸻
+
+⚠️ CRITICAL FIX
+
+Replace fake “Connect” buttons with real OAuth implementations.
+
+Simply toggling “Connected” in UI is unacceptable.
+
+Integrations must only show “Connected” after:
+	•	OAuth success
+	•	Token stored
+	•	API verified
+
+⸻
+
+🎯 FINAL GOAL
+
+User uploads CSV
+→ Connects Gmail
+→ Connects Notion
+→ Sets automation time
+→ Clicks Start Automation
+→ Emails send automatically
+→ Follow-ups reference prior emails
+→ Replies cancel automation
+→ Status syncs to Notion
+→ System runs daily
+
+Fully automated.
+
+⸻
+
+🔥 IMPORTANT
+
+This must be built as a real SaaS automation system.
+
+No mock logic.
+No placeholder connections.
+No fake connected states.
+
+Everything must work properly.
+
+⸻
+
+Now to answer your direct question:
+
+Is entering a Notion database ID and clicking connect correct?
+
+No.
+
+That is NOT how real integrations work.
+
+Real integrations use OAuth authorization.
+Database ID input alone is insecure and incomplete.
+
+If Replit built it that way, it built a fake integration.
+
+You were right to question it.

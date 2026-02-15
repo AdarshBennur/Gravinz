@@ -35,10 +35,10 @@ type Contact = {
 const statusLabel: Record<string, string> = {
   replied: "Replied",
   followup: "Follow-up",
-  "followup-1": "Follow-up 1",
-  "followup-2": "Follow-up 2",
-  "not-sent": "Not sent",
-  sent: "Sent",
+  "followup-1": "Follow-Up 1",
+  "followup-2": "Follow-Up 2",
+  "not-sent": "Not Applied",
+  sent: "First Email Sent",
   bounced: "Bounced",
   paused: "Paused",
 };
@@ -340,7 +340,7 @@ export default function ContactsPage() {
                 <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
                 <TabsTrigger value="replied" data-testid="tab-replied">Replied</TabsTrigger>
                 <TabsTrigger value="sent" data-testid="tab-sent">Sent</TabsTrigger>
-                <TabsTrigger value="not-sent" data-testid="tab-not-sent">Not sent</TabsTrigger>
+                <TabsTrigger value="not-sent" data-testid="tab-not-sent">Not Applied</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

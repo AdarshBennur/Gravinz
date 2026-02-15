@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Save } from "lucide-react";
+import { Save, Play, Square, Clock } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
-import { apiGet, apiPut } from "@/lib/api";
+import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 
 interface CampaignSettings {
@@ -21,7 +21,28 @@ interface CampaignSettings {
   delays: number[];
   priority: "followups" | "fresh" | "balanced";
   balanced: number;
+  automationStatus?: string;
+  startTime?: string;
+  timezone?: string;
 }
+
+const TIMEZONES = [
+  "America/New_York",
+  "America/Chicago",
+  "America/Denver",
+  "America/Los_Angeles",
+  "America/Phoenix",
+  "America/Anchorage",
+  "Pacific/Honolulu",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Asia/Tokyo",
+  "Asia/Shanghai",
+  "Asia/Kolkata",
+  "Australia/Sydney",
+  "UTC",
+];
 
 export default function CampaignSettingsPage() {
   const { toast } = useToast();
@@ -30,11 +51,15 @@ export default function CampaignSettingsPage() {
   const [delays, setDelays] = useState<number[]>([2, 4]);
   const [priority, setPriority] = useState<"followups" | "fresh" | "balanced">("balanced");
   const [balanced, setBalanced] = useState(60);
+  const [startTime, setStartTime] = useState("09:00");
+  const [timezone, setTimezone] = useState("America/New_York");
 
   const { data, isLoading } = useQuery<CampaignSettings>({
     queryKey: ["/api/campaign-settings"],
     queryFn: () => apiGet<CampaignSettings>("/api/campaign-settings"),
   });
+
+  const automationStatus = data?.automationStatus || "stopped";
 
   useEffect(() => {
     if (data) {
@@ -43,12 +68,14 @@ export default function CampaignSettingsPage() {
       setDelays(data.delays ?? [2, 4]);
       setPriority(data.priority ?? "balanced");
       setBalanced(data.balanced ?? 60);
+      setStartTime(data.startTime ?? "09:00");
+      setTimezone(data.timezone ?? "America/New_York");
     }
   }, [data]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      apiPut("/api/campaign-settings", { dailyLimit, followups, delays, priority, balanced }),
+      apiPut("/api/campaign-settings", { dailyLimit, followups, delays, priority, balanced, startTime, timezone }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/campaign-settings"] });
       toast({ title: "Saved", description: "Campaign settings saved." });
@@ -56,6 +83,24 @@ export default function CampaignSettingsPage() {
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message });
     },
+  });
+
+  const startAutomation = useMutation({
+    mutationFn: () => apiPost("/api/automation/start"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/campaign-settings"] });
+      toast({ title: "Automation started", description: `Emails will begin sending at ${startTime}.` });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message }),
+  });
+
+  const stopAutomation = useMutation({
+    mutationFn: () => apiPost("/api/automation/stop"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/campaign-settings"] });
+      toast({ title: "Automation stopped" });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message }),
   });
 
   const delayFields = useMemo(() => Array.from({ length: followups }), [followups]);
@@ -84,8 +129,12 @@ export default function CampaignSettingsPage() {
       title="Campaign settings"
       subtitle="Tune daily limits, follow-up cadence, and prioritization."
       headerRight={
-        <Badge variant="secondary" className="rounded-full" data-testid="status-campaign">
-          Draft
+        <Badge
+          variant={automationStatus === "running" ? "default" : "secondary"}
+          className="rounded-full"
+          data-testid="status-campaign"
+        >
+          {automationStatus === "running" ? "Running" : automationStatus === "paused" ? "Paused" : "Stopped"}
         </Badge>
       }
     >
@@ -103,6 +152,38 @@ export default function CampaignSettingsPage() {
               />
               <div className="text-xs text-muted-foreground" data-testid="help-daily-limit">
                 Start conservative to protect deliverability.
+              </div>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="start-time" data-testid="label-start-time">
+                  <Clock className="inline h-3.5 w-3.5 mr-1" />
+                  Automation start time
+                </Label>
+                <Input
+                  id="start-time"
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => setStartTime(e.target.value)}
+                  data-testid="input-start-time"
+                />
+                <div className="text-xs text-muted-foreground" data-testid="help-start-time">
+                  Automation runs daily starting at this time.
+                </div>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="timezone" data-testid="label-timezone">Timezone</Label>
+                <Select value={timezone} onValueChange={setTimezone}>
+                  <SelectTrigger data-testid="select-timezone">
+                    <SelectValue placeholder="Select timezone" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TIMEZONES.map((tz) => (
+                      <SelectItem key={tz} value={tz}>{tz.replace(/_/g, " ")}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -212,56 +293,92 @@ export default function CampaignSettingsPage() {
 
             <div className="flex items-center justify-end gap-2">
               <Button
-                variant="secondary"
-                onClick={() => toast({ title: "Preview", description: "Preview mode coming soon." })}
-                data-testid="button-preview-settings"
-              >
-                Preview
-              </Button>
-              <Button
                 onClick={() => saveMutation.mutate()}
                 disabled={saveMutation.isPending}
                 data-testid="button-save-settings"
               >
                 <Save className="mr-2 h-4 w-4" />
-                {saveMutation.isPending ? "Saving…" : "Save settings"}
+                {saveMutation.isPending ? "Saving..." : "Save settings"}
               </Button>
             </div>
           </div>
         </Card>
 
-        <Card className="glass p-6" data-testid="card-campaign-summary">
-          <div className="text-sm font-semibold" data-testid="text-summary-title">Summary</div>
-          <div className="mt-3 space-y-3 text-sm">
-            <div className="flex items-center justify-between" data-testid="row-summary-limit">
-              <div className="text-muted-foreground">Daily limit</div>
-              <div className="font-medium" data-testid="text-summary-limit">{dailyLimit}</div>
+        <div className="grid gap-4 content-start">
+          <Card className="glass p-6" data-testid="card-automation-control">
+            <div className="text-sm font-semibold" data-testid="text-automation-title">Automation Control</div>
+            <div className="mt-3 text-sm text-muted-foreground">
+              {automationStatus === "running"
+                ? `Automation is active. Sends start at ${startTime} daily.`
+                : "Start automation to begin sending emails automatically."}
             </div>
-            <div className="flex items-center justify-between" data-testid="row-summary-followups">
-              <div className="text-muted-foreground">Follow-ups</div>
-              <div className="font-medium" data-testid="text-summary-followups">{followups}</div>
+            <div className="mt-4 flex gap-2">
+              {automationStatus !== "running" ? (
+                <Button
+                  onClick={() => startAutomation.mutate()}
+                  disabled={startAutomation.isPending}
+                  className="w-full"
+                  data-testid="button-start-automation"
+                >
+                  <Play className="mr-2 h-4 w-4" />
+                  {startAutomation.isPending ? "Starting..." : "Start Automation"}
+                </Button>
+              ) : (
+                <Button
+                  variant="destructive"
+                  onClick={() => stopAutomation.mutate()}
+                  disabled={stopAutomation.isPending}
+                  className="w-full"
+                  data-testid="button-stop-automation"
+                >
+                  <Square className="mr-2 h-4 w-4" />
+                  {stopAutomation.isPending ? "Stopping..." : "Stop Automation"}
+                </Button>
+              )}
             </div>
-            <div className="flex items-center justify-between" data-testid="row-summary-priority">
-              <div className="text-muted-foreground">Priority</div>
-              <div className="font-medium" data-testid="text-summary-priority">{priority}</div>
-            </div>
-          </div>
+          </Card>
 
-          <div className="mt-5 rounded-xl border bg-background/60 p-4" data-testid="card-validation">
-            <div className="text-sm font-medium" data-testid="text-validation-title">Deliverability checks</div>
-            <div className="mt-2 space-y-2 text-xs text-muted-foreground">
-              {[
-                dailyLimit <= 120 ? "Daily limit is within safe range" : "Daily limit may be too aggressive",
-                followups <= 3 ? "Follow-up count is conservative" : "Consider fewer follow-ups",
-              ].map((t, i) => (
-                <div key={i} className="flex items-center justify-between" data-testid={`text-validation-${i}`}>
-                  <span>{t}</span>
-                  <Badge variant="secondary" className="rounded-full">AI</Badge>
-                </div>
-              ))}
+          <Card className="glass p-6" data-testid="card-campaign-summary">
+            <div className="text-sm font-semibold" data-testid="text-summary-title">Summary</div>
+            <div className="mt-3 space-y-3 text-sm">
+              <div className="flex items-center justify-between" data-testid="row-summary-limit">
+                <div className="text-muted-foreground">Daily limit</div>
+                <div className="font-medium" data-testid="text-summary-limit">{dailyLimit}</div>
+              </div>
+              <div className="flex items-center justify-between" data-testid="row-summary-followups">
+                <div className="text-muted-foreground">Follow-ups</div>
+                <div className="font-medium" data-testid="text-summary-followups">{followups}</div>
+              </div>
+              <div className="flex items-center justify-between" data-testid="row-summary-priority">
+                <div className="text-muted-foreground">Priority</div>
+                <div className="font-medium" data-testid="text-summary-priority">{priority}</div>
+              </div>
+              <div className="flex items-center justify-between" data-testid="row-summary-start-time">
+                <div className="text-muted-foreground">Start time</div>
+                <div className="font-medium" data-testid="text-summary-start-time">{startTime}</div>
+              </div>
+              <div className="flex items-center justify-between" data-testid="row-summary-timezone">
+                <div className="text-muted-foreground">Timezone</div>
+                <div className="font-medium text-xs" data-testid="text-summary-timezone">{timezone.replace(/_/g, " ")}</div>
+              </div>
             </div>
-          </div>
-        </Card>
+
+            <div className="mt-5 rounded-xl border bg-background/60 p-4" data-testid="card-validation">
+              <div className="text-sm font-medium" data-testid="text-validation-title">Deliverability checks</div>
+              <div className="mt-2 space-y-2 text-xs text-muted-foreground">
+                {[
+                  dailyLimit <= 120 ? "Daily limit is within safe range" : "Daily limit may be too aggressive",
+                  followups <= 3 ? "Follow-up count is conservative" : "Consider fewer follow-ups",
+                ].map((t, i) => (
+                  <div key={i} className="flex items-center justify-between" data-testid={`text-validation-${i}`}>
+                    <span>{t}</span>
+                    <Badge variant="secondary" className="rounded-full">AI</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+        </div>
       </div>
     </AppShell>
   );

@@ -143,6 +143,8 @@ export const campaignSettings = pgTable("campaign_settings", {
   priorityMode: priorityModeEnum("priority_mode").default("balanced"),
   balancedRatio: integer("balanced_ratio").default(60),
   automationStatus: automationStatusEnum("automation_status").default("paused"),
+  startTime: text("start_time").default("09:00"),
+  timezone: text("timezone").default("America/New_York"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

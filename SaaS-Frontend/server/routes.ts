@@ -452,6 +452,8 @@ export async function registerRoutes(
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
+        startTime: settings.startTime ?? "09:00",
+        timezone: settings.timezone ?? "America/New_York",
       });
     } catch (error: any) {
       console.error("Get campaign settings error:", error);
@@ -462,13 +464,15 @@ export async function registerRoutes(
   app.put("/api/campaign-settings", requireAuth, async (req, res) => {
     try {
       const userId = getSessionUserId(req)!;
-      const { dailyLimit, followups, delays, priority, balanced } = req.body;
+      const { dailyLimit, followups, delays, priority, balanced, startTime, timezone } = req.body;
       const settings = await storage.upsertCampaignSettings(userId, {
         dailyLimit: dailyLimit ?? undefined,
         followupCount: followups ?? undefined,
         followupDelays: delays ?? undefined,
         priorityMode: priority ?? undefined,
         balancedRatio: balanced ?? undefined,
+        startTime: startTime ?? undefined,
+        timezone: timezone ?? undefined,
       });
       res.json({
         dailyLimit: settings.dailyLimit,
@@ -477,6 +481,8 @@ export async function registerRoutes(
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
+        startTime: settings.startTime ?? "09:00",
+        timezone: settings.timezone ?? "America/New_York",
       });
     } catch (error: any) {
       console.error("Update campaign settings error:", error);
@@ -775,6 +781,17 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("List Notion databases error:", error);
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/integrations/notion/databases", requireAuth, async (req, res) => {
+    try {
+      const userId = getSessionUserId(req)!;
+      const databases = await listNotionDatabases(userId);
+      res.json(databases);
+    } catch (error: any) {
+      console.error("List Notion databases error:", error);
+      res.status(500).json({ message: error.message || "Failed to list databases" });
     }
   });
 

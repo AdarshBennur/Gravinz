@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Mail, NotionLogoIcon } from "@/components/app/icons";
-import { Download } from "lucide-react";
+import { Download, RefreshCw } from "lucide-react";
 
 import AppShell from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
@@ -20,9 +20,14 @@ interface IntegrationStatus {
   notion: { connected: boolean; metadata?: { databaseId?: string; workspaceName?: string }; configured?: boolean };
 }
 
+interface NotionDatabase {
+  id: string;
+  title: string;
+}
+
 export default function IntegrationsPage() {
   const { toast } = useToast();
-  const [dbId, setDbId] = useState("");
+  const [selectedDbId, setSelectedDbId] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -37,6 +42,7 @@ export default function IntegrationsPage() {
     if (params.get("notion") === "connected") {
       toast({ title: "Notion connected successfully" });
       queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/integrations/notion/databases"] });
       window.history.replaceState({}, "", "/app/integrations");
     } else if (params.get("notion") === "error") {
       toast({ title: "Notion connection failed", description: params.get("message") || "Please try again" });
@@ -52,12 +58,11 @@ export default function IntegrationsPage() {
   const gmailConnected = data?.gmail?.connected ?? false;
   const notionConnected = data?.notion?.connected ?? false;
 
-  const gmailStatus = gmailConnected
-    ? `Connected${data?.gmail?.email ? ` (${data.gmail.email})` : ""}`
-    : "Not connected";
-  const notionStatus = notionConnected
-    ? `Connected${data?.notion?.metadata?.workspaceName ? ` (${data.notion.metadata.workspaceName})` : ""}`
-    : "Not connected";
+  const { data: notionDatabases = [], isLoading: dbsLoading, refetch: refetchDbs } = useQuery<NotionDatabase[]>({
+    queryKey: ["/api/integrations/notion/databases"],
+    queryFn: () => apiGet<NotionDatabase[]>("/api/integrations/notion/databases"),
+    enabled: notionConnected,
+  });
 
   const connectGmail = useMutation({
     mutationFn: () => apiPost<any>("/api/integrations/gmail/connect"),
@@ -82,7 +87,7 @@ export default function IntegrationsPage() {
   });
 
   const connectNotion = useMutation({
-    mutationFn: () => apiPost<any>("/api/integrations/notion/connect", { databaseId: dbId }),
+    mutationFn: () => apiPost<any>("/api/integrations/notion/connect"),
     onSuccess: (result) => {
       if (result.authUrl) {
         window.location.href = result.authUrl;
@@ -98,7 +103,7 @@ export default function IntegrationsPage() {
     mutationFn: () => apiPost("/api/integrations/notion/disconnect"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
-      setDbId("");
+      setSelectedDbId("");
       toast({ title: "Notion disconnected" });
     },
     onError: (err: Error) => toast({ title: "Error", description: err.message }),
@@ -191,6 +196,12 @@ export default function IntegrationsPage() {
               </Button>
             )}
           </div>
+
+          {!data?.gmail?.configured && !gmailConnected && (
+            <div className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-muted-foreground">
+              Requires Google OAuth credentials. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your environment.
+            </div>
+          )}
         </Card>
 
         <Card className="glass p-6" data-testid="card-notion">
@@ -221,43 +232,61 @@ export default function IntegrationsPage() {
             </div>
           )}
 
-          <div className="mt-5 grid gap-2">
-            <Label htmlFor="db" data-testid="label-notion-db">Database ID</Label>
-            <Input
-              id="db"
-              placeholder="e.g. 8f3a..."
-              value={dbId}
-              onChange={(e) => setDbId(e.target.value)}
-              data-testid="input-notion-db"
-            />
-          </div>
+          {notionConnected && (
+            <div className="mt-5 grid gap-2">
+              <div className="flex items-center justify-between">
+                <Label data-testid="label-notion-db">Select database</Label>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6"
+                  onClick={() => refetchDbs()}
+                  disabled={dbsLoading}
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${dbsLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+              {dbsLoading ? (
+                <Skeleton className="h-10 w-full" />
+              ) : notionDatabases.length === 0 ? (
+                <div className="text-xs text-muted-foreground rounded-lg border bg-background/60 p-3">
+                  No databases found in your connected workspace. Make sure you granted access to at least one database during authorization.
+                </div>
+              ) : (
+                <Select value={selectedDbId} onValueChange={setSelectedDbId}>
+                  <SelectTrigger data-testid="select-notion-db">
+                    <SelectValue placeholder="Choose a database..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {notionDatabases.map((db) => (
+                      <SelectItem key={db.id} value={db.id}>{db.title}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          )}
 
           <div className="mt-4 flex flex-col gap-2 sm:flex-row">
             {!notionConnected ? (
               <Button
-                onClick={() => {
-                  if (!data?.notion?.configured && !dbId.trim()) {
-                    toast({ title: "Add a Database ID", description: "This is required to connect." });
-                    return;
-                  }
-                  connectNotion.mutate();
-                }}
+                onClick={() => connectNotion.mutate()}
                 disabled={connectNotion.isPending}
                 data-testid="button-connect-notion"
               >
-                {connectNotion.isPending ? "Connecting..." : "Connect"}
+                {connectNotion.isPending ? "Connecting..." : "Connect Notion"}
               </Button>
             ) : (
               <>
                 <Button
                   onClick={() => {
-                    if (!dbId.trim()) {
-                      toast({ title: "Enter Database ID", description: "Provide a Notion database ID to import contacts from." });
+                    if (!selectedDbId) {
+                      toast({ title: "Select a database", description: "Pick a database from the dropdown to import contacts." });
                       return;
                     }
-                    importFromNotion.mutate(dbId);
+                    importFromNotion.mutate(selectedDbId);
                   }}
-                  disabled={importFromNotion.isPending}
+                  disabled={importFromNotion.isPending || !selectedDbId}
                   data-testid="button-import-notion"
                 >
                   <Download className="mr-2 h-4 w-4" />
@@ -274,6 +303,12 @@ export default function IntegrationsPage() {
               </>
             )}
           </div>
+
+          {!data?.notion?.configured && !notionConnected && (
+            <div className="mt-3 rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-muted-foreground">
+              Requires Notion OAuth credentials. Add NOTION_CLIENT_ID and NOTION_CLIENT_SECRET in your environment.
+            </div>
+          )}
         </Card>
       </div>
     </AppShell>

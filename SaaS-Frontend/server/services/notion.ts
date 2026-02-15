@@ -208,7 +208,7 @@ export async function syncContactStatusToNotion(
 
 function statusToNotionLabel(status: string): string {
   const map: Record<string, string> = {
-    "not-sent": "Not Sent",
+    "not-sent": "Not Applied",
     sent: "First Email Sent",
     "followup-1": "Follow-Up 1",
     "followup-2": "Follow-Up 2",

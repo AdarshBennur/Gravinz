@@ -63,9 +63,40 @@ async function runAutomationCycle() {
   }
 }
 
+function isAfterStartTime(settings: any): boolean {
+  const startTime = settings.startTime || "09:00";
+  const tz = settings.timezone || "America/New_York";
+
+  try {
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(now);
+    const currentHour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+    const currentMinute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+
+    const [startHour, startMinute] = startTime.split(":").map(Number);
+    const currentMinutes = currentHour * 60 + currentMinute;
+    const startMinutes = startHour * 60 + startMinute;
+
+    return currentMinutes >= startMinutes;
+  } catch {
+    return true;
+  }
+}
+
 async function processUserAutomation(userId: string) {
   const settings = await storage.getCampaignSettings(userId);
   if (!settings || settings.automationStatus !== "running") return;
+
+  if (!isAfterStartTime(settings)) {
+    console.log(`[Automation] User ${userId}: Before start time (${settings.startTime || "09:00"}), skipping`);
+    return;
+  }
 
   const gmailIntegration = await storage.getIntegration(userId, "gmail");
   if (!gmailIntegration?.connected) {
