@@ -5,8 +5,8 @@ import { sendEmail, checkForReplies, isGmailConfigured } from "./gmail";
 import { syncContactStatusToNotion } from "./notion";
 import { eq, and, desc } from "drizzle-orm";
 
-let automationTask: cron.ScheduledTask | null = null;
-let replyCheckTask: cron.ScheduledTask | null = null;
+let automationTask: ReturnType<typeof cron.schedule> | null = null;
+let replyCheckTask: ReturnType<typeof cron.schedule> | null = null;
 let sendCycleRunning = false;
 let replyCheckRunning = false;
 
@@ -114,65 +114,69 @@ async function processUserAutomation(userId: string) {
     return;
   }
 
-  const remaining = dailyLimit - sentToday;
+  const remainingQuota = dailyLimit - sentToday;
   const contacts = await storage.getContacts(userId);
 
-  const followupContacts = contacts.filter((c) => {
-    if (!c.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)) return false;
-    if (c.status === "replied" || c.status === "bounced" || c.status === "paused") return false;
-    if (c.status === "not-sent") return false;
+  // Sort contacts by lastSentAt to prioritize those waiting longest (fair queueing)
+  // Logic: 
+  // 1. "not-sent" contacts (new)
+  // 2. "first_email_sent" (waiting for followup 1)
+  // 3. "followup_1_sent" (waiting for followup 2)
+  // We process them in a simple loop until quota fills.
 
-    const maxFollowups = settings.followupCount ?? 2;
-    if ((c.followupsSent ?? 0) >= maxFollowups) return false;
+  let processedCount = 0;
+  const maxFollowups = settings.followupCount ?? 2;
+  const delays = (settings.followupDelays as number[]) || [2, 4];
 
-    if (c.lastSentAt) {
-      const delays = (settings.followupDelays as number[]) || [2, 4];
-      const currentFollowup = c.followupsSent ?? 0;
-      const delayDays = delays[currentFollowup] ?? delays[delays.length - 1] ?? 3;
-      const daysSinceLastSent = Math.floor((Date.now() - new Date(c.lastSentAt).getTime()) / (1000 * 60 * 60 * 24));
-      if (daysSinceLastSent < delayDays) return false;
+  for (const contact of contacts) {
+    if (processedCount >= remainingQuota) break;
+
+    // Skip terminal states
+    if (["replied", "bounced", "stopped", "manual_break"].includes(contact.status || "")) continue;
+
+    let shouldSend = false;
+    let isFollowup = false;
+    let nextFollowupNumber = 0;
+
+    switch (contact.status) {
+      case "not-sent":
+        shouldSend = true;
+        isFollowup = false;
+        nextFollowupNumber = 0;
+        break;
+
+      case "first_email_sent": // Waiting for Follow-up 1
+        if (maxFollowups >= 1) {
+          const daysSince = daysSinceLastSent(contact.lastSentAt);
+          const requiredDelay = delays[0] ?? 2;
+          if (daysSince >= requiredDelay) {
+            shouldSend = true;
+            isFollowup = true;
+            nextFollowupNumber = 1;
+          }
+        }
+        break;
+
+      case "followup_1_sent": // Waiting for Follow-up 2
+        if (maxFollowups >= 2) {
+          const daysSince = daysSinceLastSent(contact.lastSentAt);
+          const requiredDelay = delays[1] ?? 4;
+          if (daysSince >= requiredDelay) {
+            shouldSend = true;
+            isFollowup = true;
+            nextFollowupNumber = 2;
+          }
+        }
+        break;
+
+      // Add more cases here if we support > 2 followups dynamically
     }
 
-    return true;
-  });
+    if (!shouldSend) continue;
 
-  const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-  const freshContacts = contacts.filter((c) => c.status === "not-sent" && c.email && isValidEmail(c.email));
-
-  let toProcess: Array<{ contact: typeof contacts[0]; type: "followup" | "fresh" }> = [];
-
-  const priority = settings.priorityMode || "balanced";
-
-  if (priority === "followups") {
-    toProcess = [
-      ...followupContacts.map((c) => ({ contact: c, type: "followup" as const })),
-      ...freshContacts.map((c) => ({ contact: c, type: "fresh" as const })),
-    ];
-  } else if (priority === "fresh") {
-    toProcess = [
-      ...freshContacts.map((c) => ({ contact: c, type: "fresh" as const })),
-      ...followupContacts.map((c) => ({ contact: c, type: "followup" as const })),
-    ];
-  } else {
-    const ratio = (settings.balancedRatio ?? 60) / 100;
-    const followupSlots = Math.floor(remaining * ratio);
-    const freshSlots = remaining - followupSlots;
-
-    toProcess = [
-      ...followupContacts.slice(0, followupSlots).map((c) => ({ contact: c, type: "followup" as const })),
-      ...freshContacts.slice(0, freshSlots).map((c) => ({ contact: c, type: "fresh" as const })),
-    ];
-  }
-
-  toProcess = toProcess.slice(0, remaining);
-
-  let sentCount = 0;
-  let followupCount = 0;
-
-  for (const { contact, type } of toProcess) {
+    // --- ACTION: SEND EMAIL ---
     try {
-      const isFollowup = type === "followup";
-      const followupNumber = isFollowup ? (contact.followupsSent ?? 0) + 1 : 0;
+      console.log(`[Automation] Processing ${contact.email} (${isFollowup ? `Follow-up ${nextFollowupNumber}` : "First Email"})`);
 
       const emailContent = await generateEmail({
         userId,
@@ -181,94 +185,99 @@ async function processUserAutomation(userId: string) {
         contactCompany: contact.company || undefined,
         contactRole: contact.role || undefined,
         isFollowup,
-        followupNumber,
+        followupNumber: nextFollowupNumber,
       });
 
-      let previousSend = null;
+      // Get Thread ID for threading if followup
+      let previousThreadId = undefined;
+      let previousMessageId = undefined;
+
       if (isFollowup) {
-        const previousSends = await storage.getEmailSendsForContact(userId, contact.id);
-        previousSend = previousSends[previousSends.length - 1] || null;
-      }
-
-      let gmailResult: { messageId: string; threadId: string };
-
-      try {
-        gmailResult = await sendEmail(
-          userId,
-          contact.email,
-          emailContent.subject,
-          emailContent.body,
-          previousSend?.gmailThreadId || undefined,
-          previousSend?.gmailMessageId || undefined
-        );
-      } catch (sendErr: any) {
-        console.error(`[Automation] Send failed for ${contact.email}:`, sendErr.message);
-
-        await storage.createEmailSend(userId, contact.id, {
-          subject: emailContent.subject,
-          body: emailContent.body,
-          status: "failed",
-          followupNumber,
-          errorMessage: sendErr.message,
-        } as any);
-
-        if (sendErr.message?.includes("bounced") || sendErr.message?.includes("invalid")) {
-          await storage.updateContact(contact.id, userId, { status: "bounced" } as any);
-          await tryNotionSync(userId, contact.id, "bounced");
+        const history = await storage.getEmailSendsForContact(userId, contact.id);
+        const lastSend = history[history.length - 1];
+        if (lastSend) {
+          previousThreadId = lastSend.gmailThreadId || undefined;
+          previousMessageId = lastSend.gmailMessageId || undefined;
         }
-
-        continue;
       }
 
-      const emailSend = await storage.createEmailSend(userId, contact.id, {
+      // REAL SEND via Gmail API
+      const result = await sendEmail(
+        userId,
+        contact.email,
+        emailContent.subject,
+        emailContent.body,
+        previousThreadId,
+        previousMessageId
+      );
+
+      // --- ON SUCCESS ONLY ---
+      const newStatus = isFollowup ? `followup_${nextFollowupNumber}_sent` : "first_email_sent";
+
+      await storage.createEmailSend(userId, contact.id, {
         subject: emailContent.subject,
         body: emailContent.body,
         status: "sent",
-        followupNumber,
+        followupNumber: nextFollowupNumber,
         sentAt: new Date(),
-        gmailMessageId: gmailResult.messageId,
-        gmailThreadId: gmailResult.threadId,
+        gmailMessageId: result.messageId,
+        gmailThreadId: result.threadId,
       } as any);
-
-      let newStatus: string;
-      if (isFollowup) {
-        newStatus = followupNumber <= 2 ? `followup-${followupNumber}` : "followup";
-        followupCount++;
-      } else {
-        newStatus = "sent";
-        sentCount++;
-      }
 
       await storage.updateContact(contact.id, userId, {
         status: newStatus,
         lastSentAt: new Date(),
-        followupsSent: followupNumber,
+        followupsSent: nextFollowupNumber,
       } as any);
 
       await storage.createActivityLog(userId, {
         contactName: contact.name,
-        action: isFollowup ? `Follow-up ${followupNumber} sent` : "First email sent",
-        status: newStatus,
+        action: isFollowup ? `Follow-up ${nextFollowupNumber} sent` : "First email sent",
+        status: "success",
       });
 
       await tryNotionSync(userId, contact.id, newStatus);
 
+      processedCount++;
+
+      // Random delay to mimic human behavior
       await new Promise((resolve) => setTimeout(resolve, 2000 + Math.random() * 3000));
-    } catch (err: any) {
-      console.error(`[Automation] Error processing contact ${contact.id}:`, err.message);
+
+    } catch (error: any) {
+      console.error(`[Automation] Failed to send to ${contact.email}:`, error.message);
+
+      await storage.createEmailSend(userId, contact.id, {
+        status: "failed",
+        errorMessage: error.message,
+        followupNumber: nextFollowupNumber,
+        subject: "Failed Generation",
+        body: "Failed Generation"
+      } as any);
+
+      if (error.message?.includes("bounced") || error.message?.includes("not found")) {
+        await storage.updateContact(contact.id, userId, { status: "bounced" } as any);
+        await tryNotionSync(userId, contact.id, "bounced");
+      }
     }
   }
 
-  if (sentCount > 0 || followupCount > 0) {
-    const currentUsage = await storage.getDailyUsage(userId, today);
+  // Update daily stats
+  if (processedCount > 0) {
+    const freshStart = await storage.getDailyUsage(userId, today);
     await storage.upsertDailyUsage(userId, today, {
-      emailsSent: (currentUsage?.emailsSent ?? 0) + sentCount + followupCount,
-      followupsSent: (currentUsage?.followupsSent ?? 0) + followupCount,
+      emailsSent: (freshStart?.emailsSent ?? 0) + processedCount,
     });
-
-    console.log(`[Automation] User ${userId}: Sent ${sentCount} fresh + ${followupCount} follow-ups`);
+    console.log(`[Automation] User ${userId}: Processed ${processedCount} emails`);
   }
 }
+
+function daysSinceLastSent(dateVal: Date | string | null): number {
+  if (!dateVal) return 999;
+  const last = new Date(dateVal).getTime();
+  const now = Date.now();
+  return Math.floor((now - last) / (1000 * 60 * 60 * 24));
+}
+
 
 async function runReplyCheck() {
   if (replyCheckRunning) {
@@ -277,55 +286,55 @@ async function runReplyCheck() {
   }
   replyCheckRunning = true;
   try {
-  const activeUsers = await storage.getUsersWithActiveAutomation();
+    const activeUsers = await storage.getUsersWithActiveAutomation();
 
-  for (const userId of activeUsers) {
-    try {
-      const gmailIntegration = await storage.getIntegration(userId, "gmail");
-      if (!gmailIntegration?.connected) continue;
+    for (const userId of activeUsers) {
+      try {
+        const gmailIntegration = await storage.getIntegration(userId, "gmail");
+        if (!gmailIntegration?.connected) continue;
 
-      const replies = await checkForReplies(userId);
-      const contacts = await storage.getContacts(userId);
+        const replies = await checkForReplies(userId);
+        const contacts = await storage.getContacts(userId);
 
-      for (const reply of replies) {
-        const contact = contacts.find(
-          (c) => c.email.toLowerCase() === reply.contactEmail
-        );
+        for (const reply of replies) {
+          const contact = contacts.find(
+            (c) => c.email.toLowerCase() === reply.contactEmail
+          );
 
-        if (!contact) continue;
-        if (contact.status === "replied") continue;
+          if (!contact) continue;
+          if (contact.status === "replied") continue;
 
-        const emailSends = await storage.getEmailSendsForContact(userId, contact.id);
-        const matchingThread = emailSends.find(
-          (es) => es.gmailThreadId === reply.threadId
-        );
+          const emailSends = await storage.getEmailSendsForContact(userId, contact.id);
+          const matchingThread = emailSends.find(
+            (es) => es.gmailThreadId === reply.threadId
+          );
 
-        if (!matchingThread) continue;
+          if (!matchingThread) continue;
 
-        await storage.updateContact(contact.id, userId, {
-          status: "replied",
-        } as any);
+          await storage.updateContact(contact.id, userId, {
+            status: "replied",
+          } as any);
 
-        await storage.createActivityLog(userId, {
-          contactName: contact.name,
-          action: "Reply received - follow-ups stopped",
-          status: "replied",
-        });
+          await storage.createActivityLog(userId, {
+            contactName: contact.name,
+            action: "Reply received - follow-ups stopped",
+            status: "replied",
+          });
 
-        const today = new Date().toISOString().split("T")[0];
-        const usage = await storage.getDailyUsage(userId, today);
-        await storage.upsertDailyUsage(userId, today, {
-          repliesReceived: (usage?.repliesReceived ?? 0) + 1,
-        });
+          const today = new Date().toISOString().split("T")[0];
+          const usage = await storage.getDailyUsage(userId, today);
+          await storage.upsertDailyUsage(userId, today, {
+            repliesReceived: (usage?.repliesReceived ?? 0) + 1,
+          });
 
-        await tryNotionSync(userId, contact.id, "replied");
+          await tryNotionSync(userId, contact.id, "replied");
 
-        console.log(`[Automation] Reply detected from ${contact.email}`);
+          console.log(`[Automation] Reply detected from ${contact.email}`);
+        }
+      } catch (err: any) {
+        console.error(`[Automation] Reply check error for user ${userId}:`, err.message);
       }
-    } catch (err: any) {
-      console.error(`[Automation] Reply check error for user ${userId}:`, err.message);
     }
-  }
   } finally {
     replyCheckRunning = false;
   }

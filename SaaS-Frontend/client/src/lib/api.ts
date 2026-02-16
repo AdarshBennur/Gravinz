@@ -1,11 +1,47 @@
+// ─── Token Management ────────────────────────────────────────────────
+let accessToken: string | null = null;
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+  if (token) {
+    localStorage.setItem("access_token", token);
+  } else {
+    localStorage.removeItem("access_token");
+  }
+}
+
+export function getAccessToken(): string | null {
+  if (!accessToken) {
+    accessToken = localStorage.getItem("access_token");
+  }
+  return accessToken;
+}
+
+export function clearTokens() {
+  accessToken = null;
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+}
+
+// ─── API Helpers ─────────────────────────────────────────────────────
+
 export async function apiRequest(
   method: string,
   url: string,
   body?: any
 ): Promise<Response> {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  const token = getAccessToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
   const options: RequestInit = {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     credentials: "include",
   };
   if (body) {

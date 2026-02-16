@@ -30,6 +30,9 @@ type Contact = {
   lastSentAt: string | null;
   source?: string;
   followupsSent?: number;
+  notionData?: Record<string, any>; // Dynamic Notion columns
+  notionColumnOrder?: string[]; // Preserves column order from Notion
+  notionRowOrder?: number; // Preserves row order from Notion
 };
 
 const statusLabel: Record<string, string> = {
@@ -144,14 +147,36 @@ export default function ContactsPage() {
       .filter((c) => {
         if (!query.trim()) return true;
         const q = query.toLowerCase();
-        return (
+
+        // Search in fixed fields
+        const inFixedFields =
           c.name?.toLowerCase().includes(q) ||
           c.email?.toLowerCase().includes(q) ||
           c.company?.toLowerCase().includes(q) ||
-          c.role?.toLowerCase().includes(q)
-        );
+          c.role?.toLowerCase().includes(q);
+
+        // Also search in Notion data if available
+        if (c.notionData) {
+          const inNotionData = Object.values(c.notionData).some(val =>
+            val && String(val).toLowerCase().includes(q)
+          );
+          return inFixedFields || inNotionData;
+        }
+
+        return inFixedFields;
       });
   }, [contacts, filter, query]);
+
+  // Determine columns to display: Use Notion columns if available, otherwise fixed columns
+  const dynamicColumns = useMemo(() => {
+    const notionContact = contacts.find(c => c.notionData && c.notionColumnOrder);
+    if (notionContact && notionContact.notionColumnOrder) {
+      return notionContact.notionColumnOrder;
+    }
+    return []; // No Notion columns, will use fixed columns
+  }, [contacts]);
+
+  const hasNotionContacts = dynamicColumns.length > 0;
 
   const allSelected = filtered.length > 0 && filtered.every((c) => selected[c.id]);
   const anySelected = filtered.some((c) => selected[c.id]);
@@ -347,8 +372,8 @@ export default function ContactsPage() {
         </Card>
 
         <Card className="glass overflow-hidden" data-testid="card-contacts-table">
-          <div className="overflow-auto">
-            <Table data-testid="table-contacts">
+          <div className="overflow-x-auto overflow-y-auto max-h-[600px]">
+            <Table className="min-w-full" data-testid="table-contacts">
               <TableHeader>
                 <TableRow>
                   <TableHead className="w-10" data-testid="th-select">
@@ -362,24 +387,35 @@ export default function ContactsPage() {
                       data-testid="checkbox-select-all"
                     />
                   </TableHead>
-                  <TableHead data-testid="th-name">Name</TableHead>
-                  <TableHead data-testid="th-email">Email</TableHead>
-                  <TableHead data-testid="th-company">Company</TableHead>
-                  <TableHead data-testid="th-role">Role</TableHead>
-                  <TableHead data-testid="th-status">Status</TableHead>
-                  <TableHead data-testid="th-last-sent">Last sent</TableHead>
+                  {/* Render dynamic Notion columns or fixed columns */}
+                  {hasNotionContacts ? (
+                    dynamicColumns.map((colName) => (
+                      <TableHead key={colName} className="min-w-[150px] whitespace-nowrap" data-testid={`th-${colName}`}>
+                        {colName}
+                      </TableHead>
+                    ))
+                  ) : (
+                    <>
+                      <TableHead data-testid="th-name">Name</TableHead>
+                      <TableHead data-testid="th-email">Email</TableHead>
+                      <TableHead data-testid="th-company">Company</TableHead>
+                      <TableHead data-testid="th-role">Role</TableHead>
+                      <TableHead data-testid="th-status">Status</TableHead>
+                      <TableHead data-testid="th-last-sent">Last sent</TableHead>
+                    </>
+                  )}
                   <TableHead className="w-10" data-testid="th-actions"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading
                   ? Array.from({ length: 4 }).map((_, i) => (
-                      <TableRow key={i}>
-                        <TableCell colSpan={8}>
-                          <Skeleton className="h-5 w-full" />
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    <TableRow key={i}>
+                      <TableCell colSpan={8}>
+                        <Skeleton className="h-5 w-full" />
+                      </TableCell>
+                    </TableRow>
+                  ))
                   : filtered.length === 0
                     ? (
                       <TableRow>
@@ -397,12 +433,35 @@ export default function ContactsPage() {
                             data-testid={`checkbox-select-${c.id}`}
                           />
                         </TableCell>
-                        <TableCell className="font-medium" data-testid={`text-contact-name-${c.id}`}>{c.name}</TableCell>
-                        <TableCell className="text-muted-foreground" data-testid={`text-contact-email-${c.id}`}>{c.email}</TableCell>
-                        <TableCell data-testid={`text-contact-company-${c.id}`}>{c.company}</TableCell>
-                        <TableCell className="text-muted-foreground" data-testid={`text-contact-role-${c.id}`}>{c.role}</TableCell>
-                        <TableCell data-testid={`cell-status-${c.id}`}><StatusBadge status={c.status} /></TableCell>
-                        <TableCell className="text-muted-foreground" data-testid={`text-contact-last-sent-${c.id}`}>{formatDate(c.lastSentAt)}</TableCell>
+                        {/* Render dynamic Notion columns or fixed columns */}
+                        {hasNotionContacts ? (
+                          dynamicColumns.map((colName) => {
+                            const value = c.notionData?.[colName];
+                            const displayValue = value == null ? "—" :
+                              Array.isArray(value) ? value.join(", ") :
+                                typeof value === "object" ? JSON.stringify(value) :
+                                  String(value);
+
+                            return (
+                              <TableCell
+                                key={colName}
+                                className="text-muted-foreground whitespace-nowrap"
+                                data-testid={`cell-${colName}-${c.id}`}
+                              >
+                                {displayValue}
+                              </TableCell>
+                            );
+                          })
+                        ) : (
+                          <>
+                            <TableCell className="font-medium" data-testid={`text-contact-name-${c.id}`}>{c.name}</TableCell>
+                            <TableCell className="text-muted-foreground" data-testid={`text-contact-email-${c.id}`}>{c.email}</TableCell>
+                            <TableCell data-testid={`text-contact-company-${c.id}`}>{c.company}</TableCell>
+                            <TableCell className="text-muted-foreground" data-testid={`text-contact-role-${c.id}`}>{c.role}</TableCell>
+                            <TableCell data-testid={`cell-status-${c.id}`}><StatusBadge status={c.status} /></TableCell>
+                            <TableCell className="text-muted-foreground" data-testid={`text-contact-last-sent-${c.id}`}>{formatDate(c.lastSentAt)}</TableCell>
+                          </>
+                        )}
                         <TableCell>
                           <Button
                             variant="ghost"

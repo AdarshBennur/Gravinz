@@ -25,24 +25,32 @@ async function buildProfileContext(userId: string): Promise<string> {
   ]);
 
   const lines: string[] = [];
+  lines.push(`## Sender Profile`);
   lines.push(`Name: ${user?.fullName || user?.username || "User"}`);
-  lines.push(`Status: ${profile?.currentStatus || "working professional"}`);
-  if (profile?.profileDescription) lines.push(`Profile: ${profile.profileDescription}`);
-  if ((profile?.skills as string[])?.length) lines.push(`Skills: ${(profile!.skills as string[]).join(", ")}`);
+  lines.push(`Current Status: ${profile?.currentStatus || "Job Seeker"}`);
+  if (profile?.profileDescription) lines.push(`Bio: ${profile.profileDescription}`);
+  if ((profile?.skills as string[])?.length) lines.push(`Key Skills: ${(profile!.skills as string[]).join(", ")}`);
   if ((profile?.targetRoles as string[])?.length) lines.push(`Target Roles: ${(profile!.targetRoles as string[]).join(", ")}`);
-  lines.push(`Tone: ${profile?.tone || "direct"}`);
+  lines.push(`Preferred Tone: ${profile?.tone || "professional but conversational"}`);
+  if (profile?.customPrompt) lines.push(`\n## Custom User Instructions\n${profile.customPrompt}`);
+
+  if (profile?.resumeUrl) {
+    // In a real scenario, we'd fetch and parse the resume text here.
+    // For now, we'll note it's available.
+    lines.push(`\n## Resume\n[Resume verified and available]`);
+  }
 
   if (exps.length > 0) {
-    lines.push("\nExperience:");
+    lines.push("\n## Experience");
     for (const e of exps) {
-      lines.push(`- ${e.role} at ${e.company} (${e.duration}): ${e.description || ""}`);
+      lines.push(`- **${e.role}** at **${e.company}** (${e.duration}): ${e.description || ""}`);
     }
   }
 
   if (projs.length > 0) {
-    lines.push("\nProjects:");
+    lines.push("\n## Key Projects");
     for (const p of projs) {
-      lines.push(`- ${p.name} (${p.tech}): ${p.impact || ""}`);
+      lines.push(`- **${p.name}** (${p.tech}): ${p.impact || ""}`);
     }
   }
 
@@ -53,12 +61,11 @@ async function getPreviousEmails(userId: string, contactId: string): Promise<str
   const sends = await storage.getEmailSendsForContact(userId, contactId);
   if (sends.length === 0) return "";
 
-  const lines: string[] = ["Previous emails sent to this contact:"];
+  const lines: string[] = ["\n## Interaction History"];
   for (const send of sends) {
-    lines.push(`\n--- Email ${send.followupNumber === 0 ? "(Initial)" : `(Follow-up ${send.followupNumber})`} ---`);
+    lines.push(`\n--- Sent on ${send.sentAt ? new Date(send.sentAt).toLocaleDateString() : "Unknown Date"} ---`);
     lines.push(`Subject: ${send.subject}`);
     lines.push(`Body: ${send.body}`);
-    if (send.sentAt) lines.push(`Sent: ${new Date(send.sentAt).toLocaleDateString()}`);
   }
 
   return lines.join("\n");
@@ -68,71 +75,88 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
   const { userId, contactId, contactName, contactCompany, contactRole, isFollowup, followupNumber } = input;
 
   const profileContext = await buildProfileContext(userId);
-  const profile = await storage.getUserProfile(userId);
-  const customPrompt = profile?.customPrompt || "";
 
-  let previousEmailContext = "";
+  let interactionContext = "";
   if (contactId) {
-    previousEmailContext = await getPreviousEmails(userId, contactId);
+    interactionContext = await getPreviousEmails(userId, contactId);
   }
+
+  const recipientContext = `
+## Recipient Details
+Name: ${contactName}
+Role: ${contactRole || "Hiring Manager"}
+Company: ${contactCompany || "Unknown Company"}
+Type: ${isFollowup ? `Follow-up #${followupNumber}` : "First Connection"}
+${interactionContext}
+`;
 
   try {
     const OpenAI = (await import("openai")).default;
     const openai = new OpenAI();
+    const apiKey = process.env.OPENAI_API_KEY;
 
-    let systemPrompt: string;
-    let userPrompt: string;
-
-    if (isFollowup && previousEmailContext) {
-      systemPrompt = customPrompt
-        ? `You are an AI cold email assistant. Custom instruction: ${customPrompt}\n\nSender profile:\n${profileContext}`
-        : `You are an AI cold email assistant that helps job seekers write follow-up emails. Write short, natural follow-ups that reference the previous conversation. Never repeat the original email. Add new value or ask a different question. Match the sender's tone preference.\n\nSender profile:\n${profileContext}`;
-
-      userPrompt = `Write follow-up #${followupNumber || 1} to ${contactName || "the recipient"}${contactRole ? ` (${contactRole})` : ""}${contactCompany ? ` at ${contactCompany}` : ""}.
-
-${previousEmailContext}
-
-Write a brief, natural follow-up that:
-1. References the previous email without repeating it
-2. Adds a new angle or insight
-3. Keeps it under 80 words
-4. Feels human, not automated
-
-Include a subject line on the first line prefixed with "Subject: ", then a blank line, then the email body. The subject should be a reply (start with "Re: ") to maintain the thread.`;
-    } else {
-      systemPrompt = customPrompt
-        ? `You are an AI cold email assistant. Custom instruction: ${customPrompt}\n\nSender profile:\n${profileContext}`
-        : `You are an AI cold email assistant that helps job seekers write personalized, professional cold emails to hiring managers and recruiters. Write short, compelling emails that feel human. Never be salesy or spammy. Match the sender's tone preference.\n\nSender profile:\n${profileContext}`;
-
-      userPrompt = `Write a cold email to ${contactName || "a hiring manager"}${contactRole ? ` who is a ${contactRole}` : ""}${contactCompany ? ` at ${contactCompany}` : ""}. Include a subject line on the first line prefixed with "Subject: ", then a blank line, then the email body. Keep it under 150 words.`;
+    if (!apiKey) {
+      throw new Error("OpenAI API key missing");
     }
 
+    const systemPrompt = `
+You are an expert career outreach assistant processing a job application email.
+
+## Your Goal
+Write a highly personalized, human-sounding cold email (or follow-up) from the Sender to the Recipient.
+
+## Rules
+1. **Analyze First**: Before writing, Reason about how the Sender's experience fits the Recipient's company/role.
+2. **No Templates**: Do not use generic placeholders like "[Company Name]". Use provided data.
+3. **Be Specific**: Reference specific projects or skills from the Sender that matter to *this* Recipient.
+4. **Tone**: Match the Sender's preference.
+5. **Length**: Keep it concise (under 150 words).
+6. **Follow-ups**: If this is a follow-up, acknowledge previous silence politely but pivot to a new value add. Do NOT just say "checking in".
+7. **Formatting**: Return JSON with "reasoning", "subject", and "body".
+
+## Input Data
+${profileContext}
+${recipientContext}
+`;
+
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
+        { role: "user", content: `Generate the ${isFollowup ? `Follow-up email #${followupNumber}` : "First cold email"} for ${contactName}.` }
       ],
-      temperature: 0.8,
-      max_tokens: 500,
+      response_format: { type: "json_object" },
+      temperature: 0.7,
     });
 
-    const response = completion.choices[0]?.message?.content || "";
-    const lines = response.split("\n");
-    const subjectLine = lines[0]?.replace(/^Subject:\s*/i, "") || "Quick intro";
-    const body = lines.slice(1).join("\n").trim();
+    const content = completion.choices[0]?.message?.content;
+    if (!content) throw new Error("No content generated");
 
-    return { subject: subjectLine, body };
+    const parsed = JSON.parse(content);
+
+    // Strip quotes if they were added to the body unexpectedly
+    const cleanBody = parsed.body.replace(/^"|"$/g, "").replace(/\\n/g, "\n");
+
+    console.log(`[AI Reasoned]: ${parsed.reasoning}`);
+
+    return {
+      subject: parsed.subject,
+      body: cleanBody,
+    };
+
   } catch (error: any) {
-    console.error("AI generation error, using fallback:", error.message);
+    console.error("AI Generation failed/skipped, falling back to basic template:", error.message);
     return generateFallbackEmail(input, profileContext);
   }
 }
 
 function generateFallbackEmail(input: EmailGenerationInput, profileContext: string): GeneratedEmail {
   const { contactName, contactCompany, contactRole, isFollowup, followupNumber } = input;
-  const skills = profileContext.match(/Skills: (.+)/)?.[1]?.split(", ") || ["technology"];
-  const name = profileContext.match(/Name: (.+)/)?.[1] || "there";
+  const skills = profileContext.match(/Key Skills: (.+)/)?.[1]?.split(", ") || ["technology"];
+  const nameLine = profileContext.match(/Name: (.+)/)?.[1] || "User";
+
+  // Clean up name if it captured too much
+  const name = nameLine.split("\n")[0].trim();
 
   if (isFollowup) {
     const followupTemplates = [
@@ -145,7 +169,7 @@ function generateFallbackEmail(input: EmailGenerationInput, profileContext: stri
         body: `Hi ${contactName || "there"},\n\nCircling back on my earlier note. I've been following ${contactCompany || "your company"}'s recent work and am genuinely excited about the direction you're heading.\n\nI'd appreciate even a brief response — happy to share more about my background if helpful.\n\nThanks,\n${name}`,
       },
     ];
-    const template = followupTemplates[(followupNumber || 1) % followupTemplates.length];
+    const template = followupTemplates[((followupNumber || 1) - 1) % followupTemplates.length];
     return { ...template, fallback: true };
   }
 

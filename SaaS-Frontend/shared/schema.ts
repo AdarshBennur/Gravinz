@@ -33,6 +33,7 @@ export const priorityModeEnum = pgEnum("priority_mode", [
   "followups",
   "fresh",
   "balanced",
+  "all",
 ]);
 
 export const emailStatusEnum = pgEnum("email_status", [
@@ -121,12 +122,21 @@ export const contacts = pgTable("contacts", {
   email: text("email").notNull(),
   company: text("company"),
   role: text("role"),
-  status: contactStatusEnum("status").default("not-sent"),
+  status: text("status").default("not-sent"), // Changed from enum to text for flexibility
   lastSentAt: timestamp("last_sent_at"),
   notionPageId: text("notion_page_id"),
   source: text("source").default("manual"),
   followupsSent: integer("followups_sent").default(0),
   notes: text("notes"),
+  // New columns for Notion import
+  firstEmailDate: timestamp("first_email_date"),
+  followup1Date: timestamp("followup1_date"),
+  followup2Date: timestamp("followup2_date"),
+  jobLink: text("job_link"),
+  // Dynamic Notion data storage
+  notionData: jsonb("notion_data"), // Stores complete Notion row (all columns)
+  notionRowOrder: integer("notion_row_order"), // Preserves original Notion row order
+  notionColumnOrder: jsonb("notion_column_order"), // Preserves original Notion column order (array of column names)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -209,10 +219,12 @@ export const activityLog = pgTable("activity_log", {
 });
 
 export const insertUserSchema = createInsertSchema(users).pick({
+  id: true,
   username: true,
   password: true,
   email: true,
   fullName: true,
+  avatarUrl: true,
 });
 
 export const insertContactSchema = createInsertSchema(contacts).omit({

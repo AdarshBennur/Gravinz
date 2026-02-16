@@ -1,10 +1,12 @@
 import { Client } from "@notionhq/client";
 import { storage } from "../storage";
+import { encryptToken, decryptToken } from "./encryption";
 
 function getNotionOAuthConfig() {
   const clientId = process.env.NOTION_CLIENT_ID;
   const clientSecret = process.env.NOTION_CLIENT_SECRET;
-  const redirectUri = process.env.NOTION_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000"}/api/integrations/notion/callback`;
+  const port = process.env.PORT || "5000";
+  const redirectUri = process.env.NOTION_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:${port}`}/api/integrations/notion/callback`;
 
   if (!clientId || !clientSecret) {
     throw new Error("Notion OAuth credentials not configured");
@@ -48,9 +50,12 @@ export async function handleNotionCallback(code: string, userId: string): Promis
 
   const data = await response.json() as any;
 
+  // Encrypt access token before storage
+  const encryptedAccessToken = encryptToken(data.access_token);
+
   await storage.upsertIntegration(userId, "notion", {
     connected: true,
-    accessToken: data.access_token,
+    accessToken: encryptedAccessToken,
     metadata: {
       workspaceName: data.workspace_name,
       workspaceId: data.workspace_id,
@@ -65,12 +70,16 @@ async function getNotionClient(userId: string): Promise<Client> {
     throw new Error("Notion not connected");
   }
 
-  return new Client({ auth: integration.accessToken });
+  // Decrypt access token from storage
+  const accessToken = decryptToken(integration.accessToken);
+
+  return new Client({ auth: accessToken });
 }
 
 export async function listNotionDatabases(userId: string): Promise<Array<{ id: string; title: string }>> {
   const notion = await getNotionClient(userId);
 
+  // @ts-ignore - Notion client types don't perfectly match runtime API
   const response = await notion.search({
     filter: { value: "database", property: "object" },
     page_size: 20,
@@ -84,69 +93,182 @@ export async function listNotionDatabases(userId: string): Promise<Array<{ id: s
     }));
 }
 
-export async function importContactsFromNotion(
+export async function getDatabaseSchema(
   userId: string,
   databaseId: string
+): Promise<{ properties: Array<{ id: string; name: string; type: string }> }> {
+  const notion = await getNotionClient(userId);
+
+  // @ts-ignore - Notion client types don't perfectly match runtime API
+  const database = await notion.databases.retrieve({
+    database_id: databaseId,
+  });
+
+  const columns = Object.entries((database as any).properties).map(([key, prop]: [string, any]) => ({
+    id: key,
+    name: key,
+    type: prop.type,
+  }));
+
+  return { properties: columns };
+}
+
+export interface ColumnMapping {
+  email: string; // Required
+  name?: string; // Optional
+  company?: string; // Optional
+  role?: string; // Optional
+  status?: string; // NEW - Optional
+  firstEmailDate?: string; // NEW - Optional
+  followup1Date?: string; // NEW - Optional
+  followup2Date?: string; // NEW - Optional
+  jobLink?: string; // NEW - Optional
+}
+
+export async function importContactsFromNotion(
+  userId: string,
+  databaseId: string,
+  columnMapping?: ColumnMapping
 ): Promise<{ imported: number; skipped: number; errors: string[] }> {
   const notion = await getNotionClient(userId);
   const errors: string[] = [];
   let imported = 0;
   let skipped = 0;
+  let rowNumber = 0;
+
+  console.log(`[Notion Import] Starting import from database ${databaseId} for user ${userId}`);
+
+  // STEP 1: Fetch database schema to get EXACT column order from Notion
+  // @ts-ignore
+  const database = await notion.databases.retrieve({ database_id: databaseId });
+
+  // LOG: Raw properties keys to verify order from API
+  const rawProps = (database as any).properties;
+  console.log(`[Notion Debug] Raw database.properties keys:`, Object.keys(rawProps));
+
+  // Extract column names using Object.entries as requested, BUT prioritize 'Title' type
+  const entries = Object.entries(rawProps);
+  const titleEntry = entries.find(([_, prop]: any) => prop.type === "title");
+  const otherEntries = entries.filter(([_, prop]: any) => prop.type !== "title");
+
+  // Force Title to index 0, then follow schema order for the rest
+  const columnOrder = titleEntry
+    ? [titleEntry[0], ...otherEntries.map(([key]) => key)]
+    : entries.map(([key]) => key);
+
+  console.log(`[Notion Debug] Final columnOrder used for import (Title first):`, columnOrder);
 
   let hasMore = true;
   let startCursor: string | undefined;
 
   while (hasMore) {
+    // @ts-ignore - Notion client types don't perfectly match runtime API
     const response = await notion.databases.query({
       database_id: databaseId,
       start_cursor: startCursor,
       page_size: 100,
+      // DO NOT SORT - preserve Notion's natural order
     });
 
+    console.log(`[Notion Import] Fetched ${response.results.length} pages from Notion`);
+
+    // LOG: Row IDs in order
+    console.log(`[Notion Debug] Page IDs in this batch:`, response.results.map(p => p.id));
+
     for (const page of response.results) {
+      rowNumber++;
       try {
         const props = (page as any).properties;
 
-        const name = extractNotionProperty(props, ["Name", "name", "Full Name", "Contact"]);
-        const email = extractNotionProperty(props, ["Email", "email", "E-mail"]);
-        const company = extractNotionProperty(props, ["Company", "company", "Organization"]);
-        const role = extractNotionProperty(props, ["Role", "role", "Title", "Position", "Job Title"]);
+        // DYNAMIC EXTRACTION: Extract properties in EXACT schema order
+        const notionData: Record<string, any> = {};
+        for (const colName of columnOrder) {
+          if (props[colName]) {
+            notionData[colName] = extractNotionValue(props[colName] as any);
+          } else {
+            notionData[colName] = null; // Column exists in schema but not in this row
+          }
+        }
 
-        if (!name || !email) {
+        console.log(`[Notion Import] Row ${rowNumber} - Extracted ${columnOrder.length} columns in schema order`);
+
+        // Extract email for duplicate checking (if column mapping exists, use it; otherwise auto-detect)
+        let email: string | null = null;
+        if (columnMapping?.email) {
+          email = notionData[columnMapping.email] || null;
+        } else {
+          // Auto-detect email from common column names
+          const emailCandidates = ["Email", "email", "E-mail", "Contact Email", "Email Address"];
+          for (const candidate of emailCandidates) {
+            if (notionData[candidate]) {
+              email = notionData[candidate];
+              break;
+            }
+          }
+        }
+
+        // STRICT VALIDATION: Skip row if no email found
+        if (!email) {
           skipped++;
-          errors.push(`Skipped row: missing name or email (page ${page.id})`);
+          const errorMsg = `Row ${rowNumber}: Skipped - No email found`;
+          errors.push(errorMsg);
+          console.log(`[Notion Import] ${errorMsg}`);
           continue;
         }
 
-        if (!isValidEmail(email)) {
-          skipped++;
-          errors.push(`Skipped row: invalid email "${email}" (page ${page.id})`);
-          continue;
+        // ONLY SKIP IF: Email already exists for this user (duplicate check)
+        if (email) {
+          const existingContact = await storage.getContactByEmail(email, userId);
+          if (existingContact) {
+            skipped++;
+            const errorMsg = `Row ${rowNumber}: Duplicate email "${email}" - already exists`;
+            errors.push(errorMsg);
+            console.log(`[Notion Import] SKIPPED - ${errorMsg}`);
+            continue;
+          }
         }
 
-        const existingContacts = await storage.getContacts(userId);
-        const duplicate = existingContacts.find(
-          (c) => c.email.toLowerCase() === email.toLowerCase()
-        );
-
-        if (duplicate) {
-          skipped++;
-          continue;
+        // Extract name for display purposes (optional, falls back to email or "Unknown")
+        let name: string | null = null;
+        if (columnMapping?.name) {
+          name = notionData[columnMapping.name] || null;
+        } else {
+          const nameCandidates = ["Name", "name", "Full Name", "Contact", "Contacted Person", "Contact Name", "Person"];
+          for (const candidate of nameCandidates) {
+            if (notionData[candidate]) {
+              name = notionData[candidate];
+              break;
+            }
+          }
         }
 
-        await storage.createContact(userId, {
-          name,
-          email,
-          company: company || null,
-          role: role || null,
+        // Default name to email username or "Unknown" (for display only)
+        const contactName = name || (email ? email.split('@')[0] : "Unknown");
+
+        // Store complete Notion row with ALL columns + preserve order
+        const newContact = await storage.createContact(userId, {
+          name: contactName,
+          email: email, // Validated as not null above
+          company: null, // Not using fixed columns for Notion imports anymore
+          role: null,
+          status: null, // Not using status column for Notion imports
           source: "notion",
           notionPageId: page.id,
-          status: "not-sent",
+          notionData: notionData, // Complete Notion row (all columns)
+          notionRowOrder: rowNumber, // Preserve original row order
+          notionColumnOrder: columnOrder, // Preserve original column order
+          firstEmailDate: null,
+          followup1Date: null,
+          followup2Date: null,
+          jobLink: null,
         } as any);
 
+        console.log(`[Notion Import] Row ${rowNumber} - IMPORTED successfully: ${email}`);
         imported++;
       } catch (e: any) {
-        errors.push(`Error importing page ${page.id}: ${e.message}`);
+        const errorMsg = `Row ${rowNumber}: Error - ${e.message}`;
+        errors.push(errorMsg);
+        console.error(`[Notion Import] ERROR -`, errorMsg, e);
       }
     }
 
@@ -154,32 +276,76 @@ export async function importContactsFromNotion(
     startCursor = response.next_cursor || undefined;
   }
 
+  console.log(`[Notion Import] COMPLETE - Imported: ${imported}, Skipped: ${skipped}, Errors: ${errors.length}`);
   return { imported, skipped, errors };
 }
 
 function extractNotionProperty(properties: Record<string, any>, possibleNames: string[]): string | null {
+  // Try exact match first
   for (const name of possibleNames) {
     const prop = properties[name];
-    if (!prop) continue;
-
-    switch (prop.type) {
-      case "title":
-        return prop.title?.[0]?.plain_text || null;
-      case "rich_text":
-        return prop.rich_text?.[0]?.plain_text || null;
-      case "email":
-        return prop.email || null;
-      case "phone_number":
-        return prop.phone_number || null;
-      case "select":
-        return prop.select?.name || null;
-      case "url":
-        return prop.url || null;
-      default:
-        return null;
+    if (prop) {
+      const value = extractNotionValue(prop);
+      if (value) return value;
     }
   }
+
+  // Try case-insensitive match as fallback
+  const lowerProps: Record<string, any> = {};
+  for (const key in properties) {
+    lowerProps[key.toLowerCase()] = properties[key];
+  }
+
+  for (const name of possibleNames) {
+    const prop = lowerProps[name.toLowerCase()];
+    if (prop) {
+      const value = extractNotionValue(prop);
+      if (value) return value;
+    }
+  }
+
   return null;
+}
+
+function extractNotionValue(prop: any): string | null {
+  if (!prop || !prop.type) return null;
+
+  let value: string | null = null;
+
+  switch (prop.type) {
+    case "title":
+      value = prop.title?.[0]?.plain_text || null;
+      break;
+    case "rich_text":
+      value = prop.rich_text?.[0]?.plain_text || null;
+      break;
+    case "email":
+      value = prop.email || null;
+      break;
+    case "phone_number":
+      value = prop.phone_number || null;
+      break;
+    case "select":
+      // Store selected option name as plain text
+      value = prop.select?.name || null;
+      break;
+    case "multi_select":
+      // Store multiple options as comma-separated string
+      value = prop.multi_select?.map((opt: any) => opt.name).join(", ") || null;
+      break;
+    case "url":
+      value = prop.url || null;
+      break;
+    case "date":
+      // Extract ISO date string
+      value = prop.date?.start || null;
+      break;
+    default:
+      value = null;
+  }
+
+  // Trim and ensure no null/undefined
+  return value ? value.trim() : null;
 }
 
 export async function syncContactStatusToNotion(

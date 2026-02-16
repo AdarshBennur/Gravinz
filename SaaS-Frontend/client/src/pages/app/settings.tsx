@@ -105,6 +105,7 @@ interface ProfileData {
     status?: string;
     description?: string;
     promptOverride?: string;
+    resumeUrl?: string;
   } | null;
   experiences: Experience[];
   projects: Project[];
@@ -124,6 +125,7 @@ export default function ProfileSettingsPage() {
 
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const { data, isLoading } = useQuery<ProfileData>({
     queryKey: ["/api/profile"],
@@ -141,6 +143,11 @@ export default function ProfileSettingsPage() {
       setPromptOverride(p?.promptOverride ?? "");
       setExperiences(data.experiences ?? []);
       setProjects(data.projects ?? []);
+      if (p?.resumeUrl) {
+        // Extract filename from URL or show default
+        const name = p.resumeUrl.split('/').pop();
+        setFileName(name || "Uploaded Resume");
+      }
     }
   }, [data]);
 
@@ -165,6 +172,46 @@ export default function ProfileSettingsPage() {
     },
   });
 
+  const handleFileUpload = async (file: File) => {
+    if (!file) return;
+
+    // Client-side validation
+    const validTypes = ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    if (!validTypes.includes(file.type)) {
+      toast({ title: "Invalid file type", description: "Please upload a PDF or DOCX file.", variant: "destructive" });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Max file size is 5MB.", variant: "destructive" });
+      return;
+    }
+
+    setUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/profile/resume', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error("Upload failed");
+      }
+
+      const json = await res.json();
+      setFileName(file.name);
+      toast({ title: "Resume Uploaded", description: "Your resume has been successfully saved." });
+      queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
+    } catch (error) {
+      console.error(error);
+      toast({ title: "Upload Failed", description: "Could not upload resume.", variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const addExperience = () => {
     setExperiences([
       ...experiences,
@@ -188,6 +235,26 @@ export default function ProfileSettingsPage() {
 
   const updateProject = (id: string, field: keyof Project, val: string) => {
     setProjects(projects.map((p) => (p.id === id ? { ...p, [field]: val } : p)));
+  };
+
+  const addProject = () => {
+    if (projects.length >= 3) {
+      toast({ title: "Limit Reached", description: "You can only add up to 3 highlight projects.", variant: "destructive" });
+      return;
+    }
+    setProjects([
+      ...projects,
+      {
+        id: Math.random().toString(36).substr(2, 9),
+        name: "",
+        tech: "",
+        impact: "",
+      },
+    ]);
+  };
+
+  const removeProject = (id: string) => {
+    setProjects(projects.filter((p) => p.id !== id));
   };
 
   if (isLoading) {
@@ -350,13 +417,26 @@ export default function ProfileSettingsPage() {
           </Card>
 
           <Card className="glass p-6" data-testid="card-projects">
-            <div className="flex items-center gap-2 mb-6">
-              <Rocket className="h-5 w-5 text-primary" />
-              <h2 className="text-lg font-semibold">Top 3 Highlight Projects</h2>
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Rocket className="h-5 w-5 text-primary" />
+                <h2 className="text-lg font-semibold">Top 3 Highlight Projects</h2>
+              </div>
+              <Button onClick={addProject} size="sm" variant="secondary" disabled={projects.length >= 3}>
+                <Plus className="h-4 w-4 mr-2" /> Add Project
+              </Button>
             </div>
             <div className="grid gap-4">
               {projects.map((p) => (
-                <Card key={p.id} className="p-4 bg-background/40">
+                <Card key={p.id} className="p-4 bg-background/40 relative group">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={() => removeProject(p.id)}
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
                   <div className="grid gap-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="grid gap-2">
@@ -378,10 +458,11 @@ export default function ProfileSettingsPage() {
                     </div>
                     <div className="grid gap-2">
                       <Label>Impact Description</Label>
-                      <Input
+                      <Textarea
                         value={p.impact}
                         onChange={(e) => updateProject(p.id, "impact", e.target.value)}
                         placeholder="1-2 line impact description"
+                        className="min-h-[100px]"
                       />
                     </div>
                   </div>
@@ -424,7 +505,7 @@ export default function ProfileSettingsPage() {
                 e.preventDefault();
                 setDragOver(false);
                 const file = e.dataTransfer.files?.[0];
-                if (file) setFileName(file.name);
+                if (file) handleFileUpload(file);
               }}
               data-testid="dropzone-resume"
             >
@@ -433,19 +514,30 @@ export default function ProfileSettingsPage() {
               <div className="mt-1 text-xs text-muted-foreground">PDF, DOCX</div>
 
               <div className="mt-4 flex w-full flex-col gap-2">
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setFileName("resume.pdf");
-                    toast({ title: "Added resume", description: "Resume file attached." });
-                  }}
-                >
-                  Choose file
-                </Button>
+                <div className="relative w-full">
+                  <Button
+                    variant="secondary"
+                    disabled={uploading}
+                    className="w-full relative"
+                    onClick={() => document.getElementById('resume-upload')?.click()}
+                  >
+                    {uploading ? "Uploading..." : "Choose file"}
+                  </Button>
+                  <input
+                    type="file"
+                    id="resume-upload"
+                    className="hidden"
+                    accept=".pdf,.docx"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleFileUpload(file);
+                    }}
+                  />
+                </div>
                 {fileName && (
-                  <Button variant="ghost" onClick={() => setFileName(null)}>Remove</Button>
+                  <Button variant="ghost" className="w-full" onClick={() => setFileName(null)}>Remove</Button>
                 )}
-                {fileName && <div className="text-xs text-muted-foreground">{fileName}</div>}
+                {fileName && <div className="text-xs text-muted-foreground break-all">{fileName}</div>}
               </div>
             </div>
           </Card>

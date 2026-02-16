@@ -1,5 +1,6 @@
 import { google } from "googleapis";
 import { storage } from "../storage";
+import { encryptToken, decryptToken } from "./encryption";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
@@ -10,7 +11,8 @@ const SCOPES = [
 function getOAuth2Client() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : "http://localhost:5000"}/api/integrations/gmail/callback`;
+  const port = process.env.PORT || "5000";
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:${port}`}/api/integrations/gmail/callback`;
 
   if (!clientId || !clientSecret) {
     throw new Error("Google OAuth credentials not configured");
@@ -33,10 +35,14 @@ export async function handleGmailCallback(code: string, userId: string): Promise
   const oauth2Client = getOAuth2Client();
   const { tokens } = await oauth2Client.getToken(code);
 
+  // Encrypt tokens before storage
+  const encryptedAccessToken = tokens.access_token ? encryptToken(tokens.access_token) : null;
+  const encryptedRefreshToken = tokens.refresh_token ? encryptToken(tokens.refresh_token) : null;
+
   await storage.upsertIntegration(userId, "gmail", {
     connected: true,
-    accessToken: tokens.access_token || null,
-    refreshToken: tokens.refresh_token || null,
+    accessToken: encryptedAccessToken,
+    refreshToken: encryptedRefreshToken,
     tokenExpiresAt: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
     metadata: {
       email: null,
@@ -65,19 +71,28 @@ async function getAuthenticatedClient(userId: string) {
     throw new Error("Gmail not connected");
   }
 
+  // Decrypt tokens from storage
+  const accessToken = decryptToken(integration.accessToken);
+  const refreshToken = integration.refreshToken ? decryptToken(integration.refreshToken) : null;
+
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials({
-    access_token: integration.accessToken,
-    refresh_token: integration.refreshToken,
+    access_token: accessToken,
+    refresh_token: refreshToken,
     expiry_date: integration.tokenExpiresAt?.getTime(),
   });
 
   if (integration.tokenExpiresAt && new Date() >= integration.tokenExpiresAt) {
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
+
+      // Encrypt new tokens before storage
+      const newAccessToken = credentials.access_token ? encryptToken(credentials.access_token) : integration.accessToken;
+      const newRefreshToken = credentials.refresh_token ? encryptToken(credentials.refresh_token) : integration.refreshToken;
+
       await storage.upsertIntegration(userId, "gmail", {
-        accessToken: credentials.access_token || integration.accessToken,
-        refreshToken: credentials.refresh_token || integration.refreshToken,
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
         tokenExpiresAt: credentials.expiry_date ? new Date(credentials.expiry_date) : integration.tokenExpiresAt,
       });
       oauth2Client.setCredentials(credentials);

@@ -1,16 +1,5 @@
-import { eq, and, desc, sql } from "drizzle-orm";
-import { db } from "./db";
+import { supabaseAdmin } from "./supabase";
 import {
-  users,
-  userProfiles,
-  experiences,
-  projects,
-  contacts,
-  campaignSettings,
-  emailSends,
-  dailyUsage,
-  integrations,
-  activityLog,
   type User,
   type InsertUser,
   type Contact,
@@ -28,8 +17,33 @@ import {
   type Integration,
   type ActivityLogEntry,
 } from "@shared/schema";
-import { randomUUID } from "crypto";
 
+// ─── camelCase ↔ snake_case helpers ─────────────────────────────
+function toSnake(str: string): string {
+  return str.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
+}
+function toCamel(str: string): string {
+  return str.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+}
+function keysToSnake(obj: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[toSnake(k)] = v;
+  }
+  return out;
+}
+function keysToCamel<T>(obj: Record<string, any>): T {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[toCamel(k)] = v;
+  }
+  return out as T;
+}
+function rowsToCamel<T>(rows: Record<string, any>[]): T[] {
+  return rows.map((r) => keysToCamel<T>(r));
+}
+
+// ─── Interface ──────────────────────────────────────────────────
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
@@ -43,14 +57,17 @@ export interface IStorage {
   createExperience(userId: string, data: InsertExperience): Promise<Experience>;
   updateExperience(id: string, userId: string, data: Partial<InsertExperience>): Promise<Experience | undefined>;
   deleteExperience(id: string, userId: string): Promise<boolean>;
+  setExperiences(userId: string, experiences: InsertExperience[]): Promise<Experience[]>;
 
   getProjects(userId: string): Promise<Project[]>;
   createProject(userId: string, data: InsertProject): Promise<Project>;
   updateProject(id: string, userId: string, data: Partial<InsertProject>): Promise<Project | undefined>;
   deleteProject(id: string, userId: string): Promise<boolean>;
+  setProjects(userId: string, projects: InsertProject[]): Promise<Project[]>;
 
   getContacts(userId: string): Promise<Contact[]>;
   getContact(id: string, userId: string): Promise<Contact | undefined>;
+  getContactByEmail(email: string, userId: string): Promise<Contact | undefined>;
   createContact(userId: string, data: InsertContact): Promise<Contact>;
   updateContact(id: string, userId: string, data: Partial<InsertContact>): Promise<Contact | undefined>;
   deleteContact(id: string, userId: string): Promise<boolean>;
@@ -90,267 +107,448 @@ export interface IStorage {
   }>;
 }
 
+// ─── Supabase PostgREST Storage Implementation ─────────────────
 export class DatabaseStorage implements IStorage {
+  // ─── Users ──────────────────────────────────────────────────
+
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    const { data } = await supabaseAdmin.from("users").select("*").eq("id", id).single();
+    return data ? keysToCamel<User>(data) : undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user;
+    const { data } = await supabaseAdmin.from("users").select("*").eq("username", username).single();
+    return data ? keysToCamel<User>(data) : undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .insert(keysToSnake(insertUser))
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<User>(data);
   }
 
-  async updateUser(id: string, data: Partial<User>): Promise<User | undefined> {
-    const [user] = await db
-      .update(users)
-      .set({ ...data, updatedAt: new Date() })
-      .where(eq(users.id, id))
-      .returning();
-    return user;
+  async updateUser(id: string, userData: Partial<User>): Promise<User | undefined> {
+    const { data, error } = await supabaseAdmin
+      .from("users")
+      .update({ ...keysToSnake(userData), updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data ? keysToCamel<User>(data) : undefined;
   }
+
+  // ─── User Profiles ─────────────────────────────────────────
 
   async getUserProfile(userId: string): Promise<UserProfile | undefined> {
-    const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
-    return profile;
+    const { data } = await supabaseAdmin.from("user_profiles").select("*").eq("user_id", userId).single();
+    return data ? keysToCamel<UserProfile>(data) : undefined;
   }
 
-  async upsertUserProfile(userId: string, data: InsertUserProfile): Promise<UserProfile> {
+  async upsertUserProfile(userId: string, profileData: InsertUserProfile): Promise<UserProfile> {
     const existing = await this.getUserProfile(userId);
     if (existing) {
-      const [updated] = await db
-        .update(userProfiles)
-        .set({ ...data, updatedAt: new Date() })
-        .where(eq(userProfiles.userId, userId))
-        .returning();
-      return updated;
+      const { data, error } = await supabaseAdmin
+        .from("user_profiles")
+        .update({ ...keysToSnake(profileData), updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .select()
+        .single();
+      if (error) throw error;
+      return keysToCamel<UserProfile>(data);
     }
-    const [created] = await db
-      .insert(userProfiles)
-      .values({ ...data, userId })
-      .returning();
-    return created;
+    const { data, error } = await supabaseAdmin
+      .from("user_profiles")
+      .insert({ ...keysToSnake(profileData), user_id: userId })
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<UserProfile>(data);
   }
+
+  // ─── Experiences ────────────────────────────────────────────
 
   async getExperiences(userId: string): Promise<Experience[]> {
-    return db.select().from(experiences).where(eq(experiences.userId, userId)).orderBy(experiences.sortOrder);
+    const { data } = await supabaseAdmin
+      .from("experiences")
+      .select("*")
+      .eq("user_id", userId)
+      .order("sort_order", { ascending: true });
+    return data ? rowsToCamel<Experience>(data) : [];
   }
 
-  async createExperience(userId: string, data: InsertExperience): Promise<Experience> {
-    const [exp] = await db.insert(experiences).values({ ...data, userId }).returning();
-    return exp;
+  async createExperience(userId: string, expData: InsertExperience): Promise<Experience> {
+    const { data, error } = await supabaseAdmin
+      .from("experiences")
+      .insert({ ...keysToSnake(expData), user_id: userId })
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<Experience>(data);
   }
 
-  async updateExperience(id: string, userId: string, data: Partial<InsertExperience>): Promise<Experience | undefined> {
-    const [exp] = await db
-      .update(experiences)
-      .set(data)
-      .where(and(eq(experiences.id, id), eq(experiences.userId, userId)))
-      .returning();
-    return exp;
+  async updateExperience(id: string, userId: string, expData: Partial<InsertExperience>): Promise<Experience | undefined> {
+    const { data, error } = await supabaseAdmin
+      .from("experiences")
+      .update(keysToSnake(expData))
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select()
+      .single();
+    if (error) return undefined;
+    return data ? keysToCamel<Experience>(data) : undefined;
   }
 
   async deleteExperience(id: string, userId: string): Promise<boolean> {
-    const result = await db
-      .delete(experiences)
-      .where(and(eq(experiences.id, id), eq(experiences.userId, userId)))
-      .returning();
-    return result.length > 0;
+    const { error, count } = await supabaseAdmin
+      .from("experiences")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("user_id", userId);
+    return !error && (count ?? 0) > 0;
   }
+
+  async setExperiences(userId: string, experiences: InsertExperience[]): Promise<Experience[]> {
+    // 1. Delete all existing experiences for user
+    const { error: deleteError } = await supabaseAdmin
+      .from("experiences")
+      .delete()
+      .eq("user_id", userId);
+
+    if (deleteError) throw deleteError;
+
+    if (experiences.length === 0) return [];
+
+    // 2. Insert new experiences
+    // Ensure we don't try to insert 'id' if it's empty/gen_random_uuid related,
+    // but usually InsertExperience allows optional id.
+    // Ideally we drop ID to let DB generate new ones, OR we keep them if we want to preserve?
+    // User wants "Add/Delete", so preserving IDs isn't strictly required unless we want to avoid UI jumps.
+    // But since we are replacing ALL, new IDs are fine.
+
+    const toInsert = experiences.map(e => {
+      // e is InsertExperience, which omits 'id' by definition
+      return { ...keysToSnake(e), user_id: userId };
+    });
+
+    const { data, error } = await supabaseAdmin
+      .from("experiences")
+      .insert(toInsert)
+      .select()
+      .order("sort_order", { ascending: true });
+
+    if (error) throw error;
+    return data ? rowsToCamel<Experience>(data) : [];
+  }
+
+  // ─── Projects ───────────────────────────────────────────────
 
   async getProjects(userId: string): Promise<Project[]> {
-    return db.select().from(projects).where(eq(projects.userId, userId)).orderBy(projects.sortOrder);
+    const { data } = await supabaseAdmin
+      .from("projects")
+      .select("*")
+      .eq("user_id", userId)
+      .order("sort_order", { ascending: true });
+    return data ? rowsToCamel<Project>(data) : [];
   }
 
-  async createProject(userId: string, data: InsertProject): Promise<Project> {
-    const [proj] = await db.insert(projects).values({ ...data, userId }).returning();
-    return proj;
+  async createProject(userId: string, projData: InsertProject): Promise<Project> {
+    const { data, error } = await supabaseAdmin
+      .from("projects")
+      .insert({ ...keysToSnake(projData), user_id: userId })
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<Project>(data);
   }
 
-  async updateProject(id: string, userId: string, data: Partial<InsertProject>): Promise<Project | undefined> {
-    const [proj] = await db
-      .update(projects)
-      .set(data)
-      .where(and(eq(projects.id, id), eq(projects.userId, userId)))
-      .returning();
-    return proj;
+  async updateProject(id: string, userId: string, projData: Partial<InsertProject>): Promise<Project | undefined> {
+    const { data, error } = await supabaseAdmin
+      .from("projects")
+      .update(keysToSnake(projData))
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select()
+      .single();
+    if (error) return undefined;
+    return data ? keysToCamel<Project>(data) : undefined;
   }
 
   async deleteProject(id: string, userId: string): Promise<boolean> {
-    const result = await db
-      .delete(projects)
-      .where(and(eq(projects.id, id), eq(projects.userId, userId)))
-      .returning();
-    return result.length > 0;
+    const { error, count } = await supabaseAdmin
+      .from("projects")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("user_id", userId);
+    return !error && (count ?? 0) > 0;
   }
 
+  async setProjects(userId: string, projects: InsertProject[]): Promise<Project[]> {
+    const { error: deleteError } = await supabaseAdmin
+      .from("projects")
+      .delete()
+      .eq("user_id", userId);
+
+    if (deleteError) throw deleteError;
+
+    if (projects.length === 0) return [];
+
+    const toInsert = projects.map(p => {
+      // p is InsertProject, which omits 'id' by definition
+      return { ...keysToSnake(p), user_id: userId };
+    });
+
+    const { data, error } = await supabaseAdmin
+      .from("projects")
+      .insert(toInsert)
+      .select()
+      .order("sort_order", { ascending: true });
+
+    if (error) throw error;
+    return data ? rowsToCamel<Project>(data) : [];
+  }
+
+  // ─── Contacts ───────────────────────────────────────────────
+
   async getContacts(userId: string): Promise<Contact[]> {
-    return db.select().from(contacts).where(eq(contacts.userId, userId)).orderBy(desc(contacts.createdAt));
+    const { data } = await supabaseAdmin
+      .from("contacts")
+      .select("*")
+      .eq("user_id", userId)
+      .order("notion_row_order", { ascending: true, nullsFirst: false })
+      .order("created_at", { ascending: false });
+    return data ? rowsToCamel<Contact>(data) : [];
   }
 
   async getContact(id: string, userId: string): Promise<Contact | undefined> {
-    const [contact] = await db
+    const { data } = await supabaseAdmin
+      .from("contacts")
+      .select("*")
+      .eq("id", id)
+      .eq("user_id", userId)
+      .single();
+    return data ? keysToCamel<Contact>(data) : undefined;
+  }
+
+  async getContactByEmail(email: string, userId: string): Promise<Contact | undefined> {
+    const { data } = await supabaseAdmin
+      .from("contacts")
+      .select("*")
+      .eq("email", email)
+      .eq("user_id", userId)
+      .single();
+    return data ? keysToCamel<Contact>(data) : undefined;
+  }
+
+  async createContact(userId: string, contactData: InsertContact): Promise<Contact> {
+    const { data, error } = await supabaseAdmin
+      .from("contacts")
+      .insert({ ...keysToSnake(contactData), user_id: userId })
       .select()
-      .from(contacts)
-      .where(and(eq(contacts.id, id), eq(contacts.userId, userId)));
-    return contact;
+      .single();
+    if (error) throw error;
+    return keysToCamel<Contact>(data);
   }
 
-  async createContact(userId: string, data: InsertContact): Promise<Contact> {
-    const [contact] = await db.insert(contacts).values({ ...data, userId }).returning();
-    return contact;
-  }
-
-  async updateContact(id: string, userId: string, data: Partial<InsertContact>): Promise<Contact | undefined> {
-    const [contact] = await db
-      .update(contacts)
-      .set({ ...data, updatedAt: new Date() })
-      .where(and(eq(contacts.id, id), eq(contacts.userId, userId)))
-      .returning();
-    return contact;
+  async updateContact(id: string, userId: string, contactData: Partial<InsertContact>): Promise<Contact | undefined> {
+    const { data, error } = await supabaseAdmin
+      .from("contacts")
+      .update({ ...keysToSnake(contactData), updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("user_id", userId)
+      .select()
+      .single();
+    if (error) return undefined;
+    return data ? keysToCamel<Contact>(data) : undefined;
   }
 
   async deleteContact(id: string, userId: string): Promise<boolean> {
-    const result = await db
-      .delete(contacts)
-      .where(and(eq(contacts.id, id), eq(contacts.userId, userId)))
-      .returning();
-    return result.length > 0;
+    const { error, count } = await supabaseAdmin
+      .from("contacts")
+      .delete({ count: "exact" })
+      .eq("id", id)
+      .eq("user_id", userId);
+    return !error && (count ?? 0) > 0;
   }
+
+  // ─── Campaign Settings ─────────────────────────────────────
 
   async getCampaignSettings(userId: string): Promise<CampaignSettings | undefined> {
-    const [settings] = await db
-      .select()
-      .from(campaignSettings)
-      .where(eq(campaignSettings.userId, userId));
-    return settings;
+    const { data } = await supabaseAdmin
+      .from("campaign_settings")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+    return data ? keysToCamel<CampaignSettings>(data) : undefined;
   }
 
-  async upsertCampaignSettings(userId: string, data: InsertCampaignSettings): Promise<CampaignSettings> {
+  async upsertCampaignSettings(userId: string, settingsData: InsertCampaignSettings): Promise<CampaignSettings> {
     const existing = await this.getCampaignSettings(userId);
     if (existing) {
-      const [updated] = await db
-        .update(campaignSettings)
-        .set({ ...data, updatedAt: new Date() })
-        .where(eq(campaignSettings.userId, userId))
-        .returning();
-      return updated;
+      const { data, error } = await supabaseAdmin
+        .from("campaign_settings")
+        .update({ ...keysToSnake(settingsData), updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .select()
+        .single();
+      if (error) throw error;
+      return keysToCamel<CampaignSettings>(data);
     }
-    const [created] = await db
-      .insert(campaignSettings)
-      .values({ ...data, userId })
-      .returning();
-    return created;
+    const { data, error } = await supabaseAdmin
+      .from("campaign_settings")
+      .insert({ ...keysToSnake(settingsData), user_id: userId })
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<CampaignSettings>(data);
   }
 
+  // ─── Email Sends ───────────────────────────────────────────
+
   async getEmailSends(userId: string, limit = 50): Promise<EmailSend[]> {
-    return db
-      .select()
-      .from(emailSends)
-      .where(eq(emailSends.userId, userId))
-      .orderBy(desc(emailSends.createdAt))
+    const { data } = await supabaseAdmin
+      .from("email_sends")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
       .limit(limit);
+    return data ? rowsToCamel<EmailSend>(data) : [];
   }
 
   async getEmailSendsForContact(userId: string, contactId: string): Promise<EmailSend[]> {
-    return db
+    const { data } = await supabaseAdmin
+      .from("email_sends")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: true });
+    return data ? rowsToCamel<EmailSend>(data) : [];
+  }
+
+  async createEmailSend(userId: string, contactId: string, sendData: Partial<EmailSend>): Promise<EmailSend> {
+    const { data, error } = await supabaseAdmin
+      .from("email_sends")
+      .insert({ ...keysToSnake(sendData), user_id: userId, contact_id: contactId })
       .select()
-      .from(emailSends)
-      .where(and(eq(emailSends.userId, userId), eq(emailSends.contactId, contactId)))
-      .orderBy(emailSends.createdAt);
+      .single();
+    if (error) throw error;
+    return keysToCamel<EmailSend>(data);
   }
 
-  async createEmailSend(userId: string, contactId: string, data: Partial<EmailSend>): Promise<EmailSend> {
-    const [send] = await db
-      .insert(emailSends)
-      .values({ ...data, userId, contactId } as any)
-      .returning();
-    return send;
+  async updateEmailSend(id: string, sendData: Partial<EmailSend>): Promise<EmailSend | undefined> {
+    const { data, error } = await supabaseAdmin
+      .from("email_sends")
+      .update(keysToSnake(sendData))
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) return undefined;
+    return data ? keysToCamel<EmailSend>(data) : undefined;
   }
 
-  async updateEmailSend(id: string, data: Partial<EmailSend>): Promise<EmailSend | undefined> {
-    const [send] = await db
-      .update(emailSends)
-      .set(data)
-      .where(eq(emailSends.id, id))
-      .returning();
-    return send;
-  }
+  // ─── Daily Usage ───────────────────────────────────────────
 
   async getDailyUsage(userId: string, date: string): Promise<DailyUsage | undefined> {
-    const [usage] = await db
-      .select()
-      .from(dailyUsage)
-      .where(and(eq(dailyUsage.userId, userId), eq(dailyUsage.date, date)));
-    return usage;
+    const { data } = await supabaseAdmin
+      .from("daily_usage")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("date", date)
+      .single();
+    return data ? keysToCamel<DailyUsage>(data) : undefined;
   }
 
-  async upsertDailyUsage(userId: string, date: string, data: Partial<DailyUsage>): Promise<DailyUsage> {
+  async upsertDailyUsage(userId: string, date: string, usageData: Partial<DailyUsage>): Promise<DailyUsage> {
     const existing = await this.getDailyUsage(userId, date);
     if (existing) {
-      const [updated] = await db
-        .update(dailyUsage)
-        .set(data)
-        .where(and(eq(dailyUsage.userId, userId), eq(dailyUsage.date, date)))
-        .returning();
-      return updated;
+      const { data, error } = await supabaseAdmin
+        .from("daily_usage")
+        .update(keysToSnake(usageData))
+        .eq("user_id", userId)
+        .eq("date", date)
+        .select()
+        .single();
+      if (error) throw error;
+      return keysToCamel<DailyUsage>(data);
     }
-    const [created] = await db
-      .insert(dailyUsage)
-      .values({ ...data, userId, date } as any)
-      .returning();
-    return created;
+    const { data, error } = await supabaseAdmin
+      .from("daily_usage")
+      .insert({ ...keysToSnake(usageData), user_id: userId, date })
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<DailyUsage>(data);
   }
+
+  // ─── Integrations ──────────────────────────────────────────
 
   async getIntegration(userId: string, type: string): Promise<Integration | undefined> {
-    const [integration] = await db
-      .select()
-      .from(integrations)
-      .where(and(eq(integrations.userId, userId), eq(integrations.type, type)));
-    return integration;
+    const { data } = await supabaseAdmin
+      .from("integrations")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("type", type)
+      .single();
+    return data ? keysToCamel<Integration>(data) : undefined;
   }
 
-  async upsertIntegration(userId: string, type: string, data: Partial<Integration>): Promise<Integration> {
+  async upsertIntegration(userId: string, type: string, integrationData: Partial<Integration>): Promise<Integration> {
     const existing = await this.getIntegration(userId, type);
     if (existing) {
-      const [updated] = await db
-        .update(integrations)
-        .set({ ...data, updatedAt: new Date() })
-        .where(and(eq(integrations.userId, userId), eq(integrations.type, type)))
-        .returning();
-      return updated;
+      const { data, error } = await supabaseAdmin
+        .from("integrations")
+        .update({ ...keysToSnake(integrationData), updated_at: new Date().toISOString() })
+        .eq("user_id", userId)
+        .eq("type", type)
+        .select()
+        .single();
+      if (error) throw error;
+      return keysToCamel<Integration>(data);
     }
-    const [created] = await db
-      .insert(integrations)
-      .values({ ...data, userId, type } as any)
-      .returning();
-    return created;
+    const { data, error } = await supabaseAdmin
+      .from("integrations")
+      .insert({ ...keysToSnake(integrationData), user_id: userId, type })
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<Integration>(data);
   }
 
+  // ─── Activity Log ──────────────────────────────────────────
+
   async getActivityLog(userId: string, limit = 20): Promise<ActivityLogEntry[]> {
-    return db
-      .select()
-      .from(activityLog)
-      .where(eq(activityLog.userId, userId))
-      .orderBy(desc(activityLog.createdAt))
+    const { data } = await supabaseAdmin
+      .from("activity_log")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
       .limit(limit);
+    return data ? rowsToCamel<ActivityLogEntry>(data) : [];
   }
 
   async createActivityLog(
     userId: string,
-    data: { contactName?: string; action: string; status?: string }
+    logData: { contactName?: string; action: string; status?: string }
   ): Promise<ActivityLogEntry> {
-    const [entry] = await db
-      .insert(activityLog)
-      .values({ ...data, userId })
-      .returning();
-    return entry;
+    const { data, error } = await supabaseAdmin
+      .from("activity_log")
+      .insert({
+        user_id: userId,
+        contact_name: logData.contactName || null,
+        action: logData.action,
+        status: logData.status || null,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return keysToCamel<ActivityLogEntry>(data);
   }
+
+  // ─── Dashboard & Analytics ─────────────────────────────────
 
   async getDashboardStats(userId: string) {
     const today = new Date().toISOString().split("T")[0];
@@ -372,13 +570,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAnalytics(userId: string, days = 7) {
-    const results = await db
-      .select()
-      .from(dailyUsage)
-      .where(eq(dailyUsage.userId, userId))
-      .orderBy(desc(dailyUsage.date))
+    const { data } = await supabaseAdmin
+      .from("daily_usage")
+      .select("*")
+      .eq("user_id", userId)
+      .order("date", { ascending: false })
       .limit(days);
 
+    const results = data ? rowsToCamel<DailyUsage>(data) : [];
     const daily = results.reverse().map((r) => ({
       day: r.date,
       sent: r.emailsSent ?? 0,
@@ -393,11 +592,11 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getUsersWithActiveAutomation(): Promise<string[]> {
-    const results = await db
-      .select({ userId: campaignSettings.userId })
-      .from(campaignSettings)
-      .where(eq(campaignSettings.automationStatus, "running"));
-    return results.map((r) => r.userId);
+    const { data } = await supabaseAdmin
+      .from("campaign_settings")
+      .select("user_id")
+      .eq("automation_status", "running");
+    return data ? data.map((r: any) => r.user_id) : [];
   }
 }
 

@@ -19,7 +19,7 @@ interface CampaignSettings {
   dailyLimit: number;
   followups: number;
   delays: number[];
-  priority: "followups" | "fresh" | "balanced";
+  priority: "followups" | "fresh" | "balanced" | "all";
   balanced: number;
   automationStatus?: string;
   startTime?: string;
@@ -49,7 +49,7 @@ export default function CampaignSettingsPage() {
   const [dailyLimit, setDailyLimit] = useState(80);
   const [followups, setFollowups] = useState(2);
   const [delays, setDelays] = useState<number[]>([2, 4]);
-  const [priority, setPriority] = useState<"followups" | "fresh" | "balanced">("balanced");
+  const [priority, setPriority] = useState<"followups" | "fresh" | "balanced" | "all">("balanced");
   const [balanced, setBalanced] = useState(60);
   const [startTime, setStartTime] = useState("09:00");
   const [timezone, setTimezone] = useState("America/New_York");
@@ -243,11 +243,12 @@ export default function CampaignSettingsPage() {
 
             <div className="grid gap-3">
               <div className="text-sm font-semibold" data-testid="text-priority-title">Priority mode</div>
-              <div className="grid gap-2 sm:grid-cols-3">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {[
                   { key: "followups", label: "Follow-ups first" },
                   { key: "fresh", label: "Fresh emails first" },
                   { key: "balanced", label: "Balanced" },
+                  { key: "all", label: "Send all" },
                 ].map((opt) => (
                   <button
                     key={opt.key}
@@ -264,7 +265,9 @@ export default function CampaignSettingsPage() {
                         ? "Blend both based on a ratio"
                         : opt.key === "followups"
                           ? "Clear queued follow-ups first"
-                          : "Send new prospects first"}
+                          : opt.key === "fresh"
+                            ? "Send new prospects first"
+                            : "Send all first emails as well as follow-up emails"}
                     </div>
                   </button>
                 ))}

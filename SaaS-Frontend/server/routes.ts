@@ -1,10 +1,13 @@
 import type { Express } from "express";
 import { type Server } from "http";
-import session from "express-session";
 import multer from "multer";
 import { parse } from "csv-parse/sync";
 import { storage } from "./storage";
-import { hashPassword, comparePassword, requireAuth, getSessionUserId } from "./auth";
+import { requireAuth, getUserId } from "./auth";
+import { supabaseAdmin, createAnonClient } from "./supabase";
+import { db } from "./db";
+import { users } from "@shared/schema";
+import { eq, sql } from "drizzle-orm";
 import {
   insertContactSchema,
   insertCampaignSettingsSchema,
@@ -13,35 +16,21 @@ import {
   insertUserProfileSchema,
 } from "@shared/schema";
 import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./services/gmail";
-import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, isNotionConfigured } from "./services/notion";
+import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
 import { startAutomationScheduler, stopAutomationScheduler } from "./services/automation";
-import memorystore from "memorystore";
-
-const MemoryStore = memorystore(session);
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
+import { campaignSettings } from "@shared/schema";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  const isProduction = process.env.NODE_ENV === "production";
-  app.use(
-    session({
-      secret: process.env.SESSION_SECRET || require("crypto").randomBytes(32).toString("hex"),
-      resave: false,
-      saveUninitialized: false,
-      store: new MemoryStore({ checkPeriod: 86400000 }),
-      cookie: {
-        secure: isProduction,
-        httpOnly: true,
-        maxAge: 7 * 24 * 60 * 60 * 1000,
-        sameSite: "lax",
-      },
-    })
-  );
-
   startAutomationScheduler();
+
+
+  // ─── Auth Endpoints (Supabase) ───────────────────────────────────────
 
   app.post("/api/auth/signup", async (req, res) => {
     try {
@@ -50,15 +39,30 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Username and password are required" });
       }
 
-      const existing = await storage.getUserByUsername(username);
-      if (existing) {
-        return res.status(409).json({ message: "Username already taken" });
+      // Use email for Supabase Auth (fall back to username@placeholder.local)
+      const authEmail = email || `${username}@placeholder.local`;
+
+      // Create user in Supabase Auth
+      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+        email: authEmail,
+        password,
+        email_confirm: true,
+        user_metadata: { username, full_name: fullName || null },
+      });
+
+      if (authError) {
+        if (authError.message?.includes("already")) {
+          return res.status(409).json({ message: "Username or email already taken" });
+        }
+        console.error("Supabase auth signup error:", authError);
+        return res.status(400).json({ message: authError.message });
       }
 
-      const hashedPassword = await hashPassword(password);
+      // Create user row in our database (using Supabase Auth UID as id)
       const user = await storage.createUser({
+        id: authData.user.id,
         username,
-        password: hashedPassword,
+        password: "managed-by-supabase",
         email: email || null,
         fullName: fullName || null,
       });
@@ -66,16 +70,48 @@ export async function registerRoutes(
       await storage.upsertUserProfile(user.id, {});
       await storage.upsertCampaignSettings(user.id, {});
 
-      req.session.userId = user.id;
+      // Sign in to get tokens
+      // Sign in to get tokens using a fresh client (to avoid polluting admin client session)
+      const supabaseAnon = createAnonClient();
+      const { data: signInData, error: signInError } = await supabaseAnon.auth.signInWithPassword({
+        email: authEmail,
+        password,
+      });
+
+      if (signInError || !signInData.session) {
+        // User was created but sign-in failed — still return user data
+        return res.status(201).json({
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          fullName: user.fullName,
+        });
+      }
+
       res.status(201).json({
         id: user.id,
         username: user.username,
         email: user.email,
         fullName: user.fullName,
+        access_token: signInData.session.access_token,
+        refresh_token: signInData.session.refresh_token,
       });
     } catch (error: any) {
       console.error("Signup error:", error);
+
+      // Handle database constraint violations (e.g., duplicate username)
+      if (error.code === '23505') {
+        if (error.message?.includes('username')) {
+          return res.status(409).json({ message: "Username already taken" });
+        }
+        if (error.message?.includes('email')) {
+          return res.status(409).json({ message: "Email already registered" });
+        }
+        return res.status(409).json({ message: "Account already exists" });
+      }
+
       res.status(500).json({ message: "Internal server error" });
+
     }
   });
 
@@ -86,22 +122,31 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Username and password are required" });
       }
 
+      // Look up the user in our DB to get their email for Supabase Auth
       const user = await storage.getUserByUsername(username);
       if (!user) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      const valid = await comparePassword(password, user.password);
-      if (!valid) {
+      const authEmail = user.email || `${username}@placeholder.local`;
+
+      const supabaseAnon = createAnonClient();
+      const { data, error } = await supabaseAnon.auth.signInWithPassword({
+        email: authEmail,
+        password,
+      });
+
+      if (error || !data.session) {
         return res.status(401).json({ message: "Invalid credentials" });
       }
 
-      req.session.userId = user.id;
       res.json({
         id: user.id,
         username: user.username,
         email: user.email,
         fullName: user.fullName,
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
       });
     } catch (error: any) {
       console.error("Login error:", error);
@@ -109,38 +154,122 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Logout failed" });
+
+  app.post("/api/auth/logout", (_req, res) => {
+    // Stateless — frontend clears tokens
+    res.json({ message: "Logged out" });
+  });
+
+  // OAuth user sync endpoint - creates user record for Google OAuth users
+  app.post("/api/auth/oauth-sync", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      console.log("[OAuth Sync] User ID from JWT:", userId);
+
+      // Check if user already exists in database
+      const existingUser = await storage.getUser(userId);
+      if (existingUser) {
+        console.log("[OAuth Sync] User already exists:", existingUser.username);
+        return res.json({
+          message: "User already synced",
+          user: {
+            id: existingUser.id,
+            username: existingUser.username,
+            email: existingUser.email,
+            fullName: existingUser.fullName,
+            avatarUrl: existingUser.avatarUrl,
+          }
+        });
       }
-      res.json({ message: "Logged out" });
-    });
+
+      console.log("[OAuth Sync] User not found, creating new user...");
+
+      // Get user data from Supabase Auth
+      const { data: { user: supabaseUser }, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
+
+      if (userError || !supabaseUser) {
+        console.error("[OAuth Sync] Failed to fetch from Supabase Auth:", userError);
+        return res.status(400).json({ message: "Could not fetch user from Supabase" });
+      }
+
+      // Extract user details from OAuth provider data
+      const email = supabaseUser.email || "";
+      const fullName = supabaseUser.user_metadata?.full_name ||
+        supabaseUser.user_metadata?.name ||
+        email.split('@')[0];
+      const avatarUrl = supabaseUser.user_metadata?.avatar_url ||
+        supabaseUser.user_metadata?.picture || null;
+
+      console.log("[OAuth Sync] Supabase user data:", { email, fullName, avatarUrl });
+
+      // Generate username from email or name
+      let username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+
+      // Ensure username is unique
+      let uniqueUsername = username;
+      let counter = 1;
+      while (true) {
+        const existing = await storage.getUserByUsername(uniqueUsername);
+        if (!existing) break;
+        uniqueUsername = `${username}${counter}`;
+        counter++;
+      }
+
+      console.log("[OAuth Sync] Creating user with username:", uniqueUsername);
+
+      // Create user record using storage (ensures consistency with getUser)
+      const newUser = await storage.createUser({
+        id: userId,
+        username: uniqueUsername,
+        email: email,
+        password: "", // OAuth users don't have a password
+        fullName: fullName,
+        avatarUrl: avatarUrl,
+      });
+
+      console.log("[OAuth Sync] User created successfully:", newUser.id);
+
+      res.json({
+        message: "User synced successfully",
+        user: {
+          id: newUser.id,
+          username: newUser.username,
+          email: newUser.email,
+          fullName: newUser.fullName,
+          avatarUrl: newUser.avatarUrl,
+        }
+      });
+    } catch (error: any) {
+      console.error("[OAuth Sync] Error:", error);
+      res.status(500).json({ message: "Failed to sync user", error: error.message });
+    }
   });
 
-  app.get("/api/auth/me", async (req, res) => {
-    const userId = getSessionUserId(req);
-    if (!userId) {
-      return res.status(401).json({ message: "Not authenticated" });
-    }
+  app.get("/api/auth/me", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const user = await storage.getUser(userId);
+      if (!user) {
+        return res.status(401).json({ message: "User not found" });
+      }
 
-    const user = await storage.getUser(userId);
-    if (!user) {
-      return res.status(401).json({ message: "User not found" });
+      res.json({
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
+      });
+    } catch (error: any) {
+      console.error("Get me error:", error);
+      res.status(500).json({ message: "Internal server error" });
     }
-
-    res.json({
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      fullName: user.fullName,
-      avatarUrl: user.avatarUrl,
-    });
   });
+
 
   app.get("/api/profile", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const [profile, exps, projs] = await Promise.all([
         storage.getUserProfile(userId),
         storage.getExperiences(userId),
@@ -153,14 +282,14 @@ export async function registerRoutes(
           : null,
         profile: profile
           ? {
-              skills: profile.skills || [],
-              roles: profile.targetRoles || [],
-              tone: profile.tone || "direct",
-              status: profile.currentStatus || "working",
-              description: profile.profileDescription || "",
-              customPrompt: profile.customPrompt || "",
-              resumeUrl: profile.resumeUrl || null,
-            }
+            skills: profile.skills || [],
+            roles: profile.targetRoles || [],
+            tone: profile.tone || "direct",
+            status: profile.currentStatus || "working",
+            description: profile.profileDescription || "",
+            customPrompt: profile.customPrompt || "",
+            resumeUrl: profile.resumeUrl || null,
+          }
           : null,
         experiences: exps,
         projects: projs,
@@ -173,9 +302,10 @@ export async function registerRoutes(
 
   app.put("/api/profile", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const { skills, roles, tone, status, description, customPrompt } = req.body;
-      const profile = await storage.upsertUserProfile(userId, {
+      const userId = getUserId(req);
+      const { skills, roles, tone, status, description, customPrompt, experiences, projects } = req.body;
+
+      const profilePromise = storage.upsertUserProfile(userId, {
         skills: skills ?? undefined,
         targetRoles: roles ?? undefined,
         tone: tone ?? undefined,
@@ -183,6 +313,21 @@ export async function registerRoutes(
         profileDescription: description ?? undefined,
         customPrompt: customPrompt ?? undefined,
       });
+
+      const experiencesPromise = Array.isArray(experiences)
+        ? storage.setExperiences(userId, experiences)
+        : Promise.resolve(undefined);
+
+      const projectsPromise = Array.isArray(projects)
+        ? storage.setProjects(userId, projects)
+        : Promise.resolve(undefined);
+
+      const [profile, updatedExperiences, updatedProjects] = await Promise.all([
+        profilePromise,
+        experiencesPromise,
+        projectsPromise
+      ]);
+
       res.json({
         skills: profile.skills || [],
         roles: profile.targetRoles || [],
@@ -190,6 +335,9 @@ export async function registerRoutes(
         status: profile.currentStatus || "working",
         description: profile.profileDescription || "",
         customPrompt: profile.customPrompt || "",
+        resumeUrl: profile.resumeUrl || null,
+        experiences: updatedExperiences,
+        projects: updatedProjects,
       });
     } catch (error: any) {
       console.error("Update profile error:", error);
@@ -197,9 +345,70 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/profile/resume", requireAuth, upload.single("file"), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      const userId = getUserId(req);
+      const file = req.file;
+      const fileExt = file.originalname.split('.').pop();
+      const fileName = `${userId}-${Date.now()}.${fileExt}`;
+      const filePath = `${userId}/${fileName}`;
+
+      // 1. Ensure bucket exists (idempotent)
+      try {
+        const { data: buckets } = await supabaseAdmin.storage.listBuckets();
+        if (!buckets?.find(b => b.name === "resumes")) {
+          await supabaseAdmin.storage.createBucket("resumes", {
+            public: true,
+            fileSizeLimit: 5242880, // 5MB
+            allowedMimeTypes: ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+          });
+          console.log("Created 'resumes' bucket");
+        }
+      } catch (bucketError: any) {
+        // Ignore likely "already exists" or permissions error, let upload try anyway
+        console.warn("Bucket creation/check warning:", bucketError.message);
+      }
+
+      // 2. Upload file to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabaseAdmin.storage
+        .from("resumes")
+        .upload(filePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error("Supabase storage upload error:", uploadError);
+        return res.status(500).json({ message: "Failed to upload file to storage" });
+      }
+
+      // 3. Get Public URL
+      const { data: { publicUrl } } = supabaseAdmin.storage
+        .from("resumes")
+        .getPublicUrl(filePath);
+
+      // 4. Update Profile with URL
+      await storage.upsertUserProfile(userId, {
+        resumeUrl: publicUrl
+      });
+
+      res.json({
+        url: publicUrl,
+        filename: file.originalname
+      });
+    } catch (error: any) {
+      console.error("Resume upload error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/experiences", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const exps = await storage.getExperiences(userId);
       res.json(exps);
     } catch (error: any) {
@@ -209,7 +418,7 @@ export async function registerRoutes(
 
   app.post("/api/experiences", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const exp = await storage.createExperience(userId, req.body);
       res.status(201).json(exp);
     } catch (error: any) {
@@ -219,8 +428,8 @@ export async function registerRoutes(
 
   app.put("/api/experiences/:id", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const exp = await storage.updateExperience(req.params.id, userId, req.body);
+      const userId = getUserId(req);
+      const exp = await storage.updateExperience(req.params.id as string, userId, req.body);
       if (!exp) return res.status(404).json({ message: "Not found" });
       res.json(exp);
     } catch (error: any) {
@@ -230,8 +439,8 @@ export async function registerRoutes(
 
   app.delete("/api/experiences/:id", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const deleted = await storage.deleteExperience(req.params.id, userId);
+      const userId = getUserId(req);
+      const deleted = await storage.deleteExperience(req.params.id as string, userId);
       if (!deleted) return res.status(404).json({ message: "Not found" });
       res.json({ message: "Deleted" });
     } catch (error: any) {
@@ -241,7 +450,7 @@ export async function registerRoutes(
 
   app.get("/api/projects", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const projs = await storage.getProjects(userId);
       res.json(projs);
     } catch (error: any) {
@@ -251,7 +460,7 @@ export async function registerRoutes(
 
   app.post("/api/projects", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const proj = await storage.createProject(userId, req.body);
       res.status(201).json(proj);
     } catch (error: any) {
@@ -261,8 +470,8 @@ export async function registerRoutes(
 
   app.put("/api/projects/:id", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const proj = await storage.updateProject(req.params.id, userId, req.body);
+      const userId = getUserId(req);
+      const proj = await storage.updateProject(req.params.id as string, userId, req.body);
       if (!proj) return res.status(404).json({ message: "Not found" });
       res.json(proj);
     } catch (error: any) {
@@ -272,8 +481,8 @@ export async function registerRoutes(
 
   app.delete("/api/projects/:id", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const deleted = await storage.deleteProject(req.params.id, userId);
+      const userId = getUserId(req);
+      const deleted = await storage.deleteProject(req.params.id as string, userId);
       if (!deleted) return res.status(404).json({ message: "Not found" });
       res.json({ message: "Deleted" });
     } catch (error: any) {
@@ -283,7 +492,7 @@ export async function registerRoutes(
 
   app.get("/api/contacts", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const list = await storage.getContacts(userId);
       res.json(list);
     } catch (error: any) {
@@ -293,7 +502,7 @@ export async function registerRoutes(
 
   app.post("/api/contacts", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const contact = await storage.createContact(userId, req.body);
       res.status(201).json(contact);
     } catch (error: any) {
@@ -303,8 +512,8 @@ export async function registerRoutes(
 
   app.put("/api/contacts/:id", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const contact = await storage.updateContact(req.params.id, userId, req.body);
+      const userId = getUserId(req);
+      const contact = await storage.updateContact(req.params.id as string, userId, req.body);
       if (!contact) return res.status(404).json({ message: "Not found" });
       res.json(contact);
     } catch (error: any) {
@@ -314,8 +523,8 @@ export async function registerRoutes(
 
   app.delete("/api/contacts/:id", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const deleted = await storage.deleteContact(req.params.id, userId);
+      const userId = getUserId(req);
+      const deleted = await storage.deleteContact(req.params.id as string, userId);
       if (!deleted) return res.status(404).json({ message: "Not found" });
       res.json({ message: "Deleted" });
     } catch (error: any) {
@@ -325,7 +534,7 @@ export async function registerRoutes(
 
   app.post("/api/contacts/import-csv", requireAuth, upload.single("file"), async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
 
       if (req.body.contacts && Array.isArray(req.body.contacts)) {
         const csvContacts = req.body.contacts;
@@ -440,7 +649,7 @@ export async function registerRoutes(
 
   app.get("/api/campaign-settings", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       let settings = await storage.getCampaignSettings(userId);
       if (!settings) {
         settings = await storage.upsertCampaignSettings(userId, {});
@@ -463,7 +672,7 @@ export async function registerRoutes(
 
   app.put("/api/campaign-settings", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const { dailyLimit, followups, delays, priority, balanced, startTime, timezone } = req.body;
       const settings = await storage.upsertCampaignSettings(userId, {
         dailyLimit: dailyLimit ?? undefined,
@@ -488,11 +697,13 @@ export async function registerRoutes(
       console.error("Update campaign settings error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
+
+
   });
 
   app.post("/api/automation/start", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
 
       const gmailIntegration = await storage.getIntegration(userId, "gmail");
       if (!gmailIntegration?.connected) {
@@ -522,7 +733,7 @@ export async function registerRoutes(
 
   app.post("/api/automation/pause", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const settings = await storage.upsertCampaignSettings(userId, {
         automationStatus: "paused",
       });
@@ -544,9 +755,34 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/automation/stop", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const settings = await storage.upsertCampaignSettings(userId, {
+        automationStatus: "stopped",
+      });
+      await storage.createActivityLog(userId, {
+        action: "Automation stopped",
+        status: "system",
+      });
+      res.json({
+        dailyLimit: settings.dailyLimit,
+        followups: settings.followupCount,
+        delays: settings.followupDelays,
+        priority: settings.priorityMode,
+        balanced: settings.balancedRatio,
+        automationStatus: settings.automationStatus,
+      });
+    } catch (error: any) {
+      console.error("Stop automation error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+
   app.get("/api/dashboard", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const [stats, activity, settings] = await Promise.all([
         storage.getDashboardStats(userId),
         storage.getActivityLog(userId, 10),
@@ -570,7 +806,7 @@ export async function registerRoutes(
 
   app.get("/api/analytics", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const days = parseInt(req.query.days as string) || 7;
       const analytics = await storage.getAnalytics(userId, days);
       res.json(analytics);
@@ -581,7 +817,7 @@ export async function registerRoutes(
 
   app.get("/api/activity", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const limit = parseInt(req.query.limit as string) || 20;
       const activity = await storage.getActivityLog(userId, limit);
       res.json(activity);
@@ -592,7 +828,7 @@ export async function registerRoutes(
 
   app.get("/api/integrations", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const [gmail, notion] = await Promise.all([
         storage.getIntegration(userId, "gmail"),
         storage.getIntegration(userId, "notion"),
@@ -616,7 +852,7 @@ export async function registerRoutes(
 
   app.get("/api/integrations/gmail/auth-url", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       if (!isGmailConfigured()) {
         return res.status(400).json({ message: "Gmail OAuth not configured. Please add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET." });
       }
@@ -653,7 +889,7 @@ export async function registerRoutes(
 
   app.post("/api/integrations/gmail/connect", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
 
       if (isGmailConfigured()) {
         const url = getGmailAuthUrl(userId);
@@ -676,7 +912,7 @@ export async function registerRoutes(
 
   app.post("/api/integrations/gmail/disconnect", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       await storage.upsertIntegration(userId, "gmail", {
         connected: false,
         accessToken: null,
@@ -695,7 +931,7 @@ export async function registerRoutes(
 
   app.get("/api/integrations/notion/auth-url", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       if (!isNotionConfigured()) {
         return res.status(400).json({ message: "Notion OAuth not configured. Please add NOTION_CLIENT_ID and NOTION_CLIENT_SECRET." });
       }
@@ -732,7 +968,7 @@ export async function registerRoutes(
 
   app.post("/api/integrations/notion/connect", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
 
       if (isNotionConfigured()) {
         const url = getNotionAuthUrl(userId);
@@ -757,7 +993,7 @@ export async function registerRoutes(
 
   app.post("/api/integrations/notion/disconnect", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       await storage.upsertIntegration(userId, "notion", {
         connected: false,
         accessToken: null,
@@ -775,7 +1011,7 @@ export async function registerRoutes(
 
   app.get("/api/integrations/notion/databases", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const databases = await listNotionDatabases(userId);
       res.json(databases);
     } catch (error: any) {
@@ -784,30 +1020,42 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/integrations/notion/databases", requireAuth, async (req, res) => {
+  // Get Notion database schema (columns) for mapping
+  app.get("/api/integrations/notion/schema/:databaseId", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const databases = await listNotionDatabases(userId);
-      res.json(databases);
-    } catch (error: any) {
-      console.error("List Notion databases error:", error);
-      res.status(500).json({ message: error.message || "Failed to list databases" });
-    }
-  });
-
-  app.post("/api/integrations/notion/import", requireAuth, async (req, res) => {
-    try {
-      const userId = getSessionUserId(req)!;
-      const { databaseId } = req.body;
+      const userId = getUserId(req);
+      const databaseId = Array.isArray(req.params.databaseId) ? req.params.databaseId[0] : req.params.databaseId;
 
       if (!databaseId) {
         return res.status(400).json({ message: "Database ID is required" });
       }
 
-      const result = await importContactsFromNotion(userId, databaseId);
+      const schema = await getDatabaseSchema(userId, databaseId);
+      res.json(schema);
+    } catch (error: any) {
+      console.error("Get Notion schema error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
 
+  app.post("/api/integrations/notion/import", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const { databaseId, columnMapping } = req.body;
+
+      if (!databaseId) {
+        return res.status(400).json({ message: "Database ID is required" });
+      }
+
+      // Import with column mapping if provided
+      const result = await importContactsFromNotion(userId, databaseId, columnMapping);
+
+      // Store both database ID and column mapping
       await storage.upsertIntegration(userId, "notion", {
-        metadata: { databaseId },
+        metadata: {
+          databaseId,
+          columnMapping: columnMapping || null
+        },
       });
 
       await storage.createActivityLog(userId, {
@@ -822,9 +1070,43 @@ export async function registerRoutes(
     }
   });
 
+  // Sync endpoint - re-imports from the stored Notion database
+  app.post("/api/integrations/notion/sync", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+
+      // Get the stored database ID from integration metadata
+      const integration = await storage.getIntegration(userId, "notion");
+
+      if (!integration || !integration.metadata?.databaseId) {
+        return res.status(400).json({ message: "No Notion database configured. Please import a database first." });
+      }
+
+      const databaseId = integration.metadata.databaseId;
+      const columnMapping = integration.metadata.columnMapping || undefined;
+
+      console.log(`[Notion Sync] Syncing database ${databaseId} for user ${userId}`);
+      if (columnMapping) {
+        console.log(`[Notion Sync] Using stored column mapping:`, columnMapping);
+      }
+
+      const result = await importContactsFromNotion(userId, databaseId, columnMapping);
+
+      await storage.createActivityLog(userId, {
+        action: `Synced ${result.imported} contacts from Notion`,
+        status: "system",
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Notion sync error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/ai/generate-email", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const { contactId, contactName, contactCompany, contactRole, isFollowup, followupNumber } = req.body;
 
       const result = await generateEmail({
@@ -846,11 +1128,11 @@ export async function registerRoutes(
 
   app.post("/api/ai/generate-next-steps", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const stats = await storage.getDashboardStats(userId);
 
       try {
-        const OpenAI = (await import("openai")).default;
+        const OpenAI = (await import("openai" as any)).default;
         const openai = new OpenAI();
 
         const completion = await openai.chat.completions.create({
@@ -896,7 +1178,7 @@ export async function registerRoutes(
 
   app.get("/api/inbox/threads", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const search = (req.query.search as string || "").toLowerCase();
       const allContacts = await storage.getContacts(userId);
       const allSends = await storage.getEmailSends(userId, 10000);
@@ -935,12 +1217,12 @@ export async function registerRoutes(
             source: contact.source,
             lastMessage: latestSend
               ? {
-                  subject: latestSend.subject,
-                  bodyPreview: (latestSend.body || "").substring(0, 100),
-                  sentAt: latestSend.sentAt,
-                  status: latestSend.status,
-                  followupNumber: latestSend.followupNumber,
-                }
+                subject: latestSend.subject,
+                bodyPreview: (latestSend.body || "").substring(0, 100),
+                sentAt: latestSend.sentAt,
+                status: latestSend.status,
+                followupNumber: latestSend.followupNumber,
+              }
               : null,
             unread: hasReply && contact.status === "replied",
             messageCount: sends.length,
@@ -964,14 +1246,14 @@ export async function registerRoutes(
 
   app.get("/api/inbox/threads/:contactId", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const contactId = req.params.contactId;
+      const userId = getUserId(req);
+      const contactId = req.params.contactId as string;
       const contact = await storage.getContact(contactId, userId);
       if (!contact) {
         return res.status(404).json({ message: "Contact not found" });
       }
 
-      const sends = await storage.getEmailSendsForContact(userId, contactId);
+      const sends = await storage.getEmailSendsForContact(userId, contactId as string);
       const delivered = sends.filter((s) => s.status === "sent" || s.status === "delivered" || s.status === "opened" || s.status === "replied").length;
       const opened = sends.filter((s) => s.status === "opened" || s.status === "replied" || s.openedAt).length;
       const replied = sends.filter((s) => s.status === "replied" || s.repliedAt).length;
@@ -1013,7 +1295,7 @@ export async function registerRoutes(
 
   app.get("/api/email-sends", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
+      const userId = getUserId(req);
       const limit = parseInt(req.query.limit as string) || 50;
       const sends = await storage.getEmailSends(userId, limit);
       res.json(sends);
@@ -1024,13 +1306,14 @@ export async function registerRoutes(
 
   app.get("/api/email-sends/contact/:contactId", requireAuth, async (req, res) => {
     try {
-      const userId = getSessionUserId(req)!;
-      const sends = await storage.getEmailSendsForContact(userId, req.params.contactId);
+      const userId = getUserId(req);
+      const sends = await storage.getEmailSendsForContact(userId, req.params.contactId as string);
       res.json(sends);
     } catch (error: any) {
       res.status(500).json({ message: "Internal server error" });
     }
   });
+
 
   return httpServer;
 }

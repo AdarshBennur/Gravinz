@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Mail, NotionLogoIcon } from "@/components/app/icons";
-import { Download, RefreshCw } from "lucide-react";
+import { Download, RefreshCw, RotateCcw } from "lucide-react";
 
 import AppShell from "@/components/app/app-shell";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { apiGet, apiPost } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import { ColumnMappingDialog, ColumnMapping } from "@/components/app/column-mapping-dialog";
 
 interface IntegrationStatus {
   gmail: { connected: boolean; email?: string | null; configured?: boolean };
@@ -28,6 +29,8 @@ interface NotionDatabase {
 export default function IntegrationsPage() {
   const { toast } = useToast();
   const [selectedDbId, setSelectedDbId] = useState("");
+  const [mappingDialogOpen, setMappingDialogOpen] = useState(false);
+  const [pendingMapping, setPendingMapping] = useState<ColumnMapping | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -110,16 +113,50 @@ export default function IntegrationsPage() {
   });
 
   const importFromNotion = useMutation({
-    mutationFn: (databaseId: string) => apiPost<any>("/api/integrations/notion/import", { databaseId }),
+    mutationFn: ({ databaseId, columnMapping }: { databaseId: string; columnMapping?: ColumnMapping }) =>
+      apiPost<any>("/api/integrations/notion/import", { databaseId, columnMapping }),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
       toast({
         title: "Notion Import Complete",
         description: `Imported ${result.imported} contacts${result.skipped ? `, ${result.skipped} skipped` : ""}`,
       });
+      setPendingMapping(null);
     },
-    onError: (err: Error) => toast({ title: "Import Error", description: err.message }),
+    onError: (err: Error) => {
+      toast({ title: "Import Error", description: err.message });
+      setPendingMapping(null);
+    },
   });
+
+  const syncFromNotion = useMutation({
+    mutationFn: () => apiPost<any>("/api/integrations/notion/sync", {}),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      toast({
+        title: "Notion Sync Complete",
+        description: `Synced ${result.imported} contacts${result.skipped ? `, ${result.skipped} skipped` : ""}`,
+      });
+    },
+    onError: (err: Error) => toast({ title: "Sync Error", description: err.message }),
+  });
+
+  const handleImportClick = () => {
+    if (!selectedDbId) {
+      toast({ title: "Select a database", description: "Pick a database from the dropdown to import contacts." });
+      return;
+    }
+    // Open mapping dialog first
+    setMappingDialogOpen(true);
+  };
+
+  const handleMappingConfirm = (mapping: ColumnMapping) => {
+    setPendingMapping(mapping);
+    if (selectedDbId) {
+      importFromNotion.mutate({ databaseId: selectedDbId, columnMapping: mapping });
+    }
+  };
 
   if (isLoading) {
     return (
@@ -279,13 +316,7 @@ export default function IntegrationsPage() {
             ) : (
               <>
                 <Button
-                  onClick={() => {
-                    if (!selectedDbId) {
-                      toast({ title: "Select a database", description: "Pick a database from the dropdown to import contacts." });
-                      return;
-                    }
-                    importFromNotion.mutate(selectedDbId);
-                  }}
+                  onClick={handleImportClick}
                   disabled={importFromNotion.isPending || !selectedDbId}
                   data-testid="button-import-notion"
                 >
@@ -294,6 +325,15 @@ export default function IntegrationsPage() {
                 </Button>
                 <Button
                   variant="secondary"
+                  onClick={() => syncFromNotion.mutate()}
+                  disabled={syncFromNotion.isPending || !data?.notion?.metadata?.databaseId}
+                  data-testid="button-sync-notion"
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  {syncFromNotion.isPending ? "Syncing..." : "Sync"}
+                </Button>
+                <Button
+                  variant="outline"
                   onClick={() => disconnectNotion.mutate()}
                   disabled={disconnectNotion.isPending}
                   data-testid="button-disconnect-notion"
@@ -311,6 +351,14 @@ export default function IntegrationsPage() {
           )}
         </Card>
       </div>
+
+      <ColumnMappingDialog
+        open={mappingDialogOpen}
+        onOpenChange={setMappingDialogOpen}
+        databaseId={selectedDbId}
+        onConfirm={handleMappingConfirm}
+        existingMapping={pendingMapping}
+      />
     </AppShell>
   );
 }

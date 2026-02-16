@@ -1,28 +1,48 @@
-import { Request, Response, NextFunction } from "express";
-import bcrypt from "bcryptjs";
-import { storage } from "./storage";
+import type { Request, Response, NextFunction } from "express";
+import { supabaseAdmin } from "./supabase";
 
-declare module "express-session" {
-  interface SessionData {
-    userId?: string;
+// Extend Express Request to include userId
+declare global {
+  namespace Express {
+    interface Request {
+      userId?: string;
+    }
   }
 }
 
-export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, 12);
-}
-
-export async function comparePassword(password: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(password, hash);
-}
-
+/**
+ * Middleware: Verify Supabase JWT and set req.userId.
+ * Expects Authorization: Bearer <access_token>
+ */
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (!req.session?.userId) {
-    return res.status(401).json({ message: "Unauthorized" });
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ message: "Missing or invalid authorization header" });
   }
-  next();
+
+  const token = authHeader.slice(7);
+
+  supabaseAdmin.auth
+    .getUser(token)
+    .then(({ data, error }) => {
+      if (error || !data.user) {
+        return res.status(401).json({ message: "Invalid or expired token" });
+      }
+      req.userId = data.user.id;
+      next();
+    })
+    .catch(() => {
+      return res.status(401).json({ message: "Authentication failed" });
+    });
 }
 
-export function getSessionUserId(req: Request): string | undefined {
-  return req.session?.userId;
+/**
+ * Get the authenticated user's ID from the request.
+ * Must be called after requireAuth middleware.
+ */
+export function getUserId(req: Request): string {
+  if (!req.userId) {
+    throw new Error("getUserId called without requireAuth middleware");
+  }
+  return req.userId;
 }
