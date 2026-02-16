@@ -105,12 +105,21 @@ async function getAuthenticatedClient(userId: string) {
   return oauth2Client;
 }
 
-function createRawEmail(to: string, from: string, subject: string, body: string, threadId?: string, messageId?: string): string {
+interface Attachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
+function createRawEmail(to: string, from: string, subject: string, body: string, threadId?: string, messageId?: string, attachments: Attachment[] = []): string {
+  const boundary = "foo_bar_baz_" + Date.now().toString(16);
+
   const headers = [
     `To: ${to}`,
     `From: ${from}`,
     `Subject: ${subject}`,
-    `Content-Type: text/plain; charset="UTF-8"`,
+    `MIME-Version: 1.0`,
+    `Content-Type: multipart/mixed; boundary="${boundary}"`,
   ];
 
   if (messageId) {
@@ -118,7 +127,24 @@ function createRawEmail(to: string, from: string, subject: string, body: string,
     headers.push(`References: ${messageId}`);
   }
 
-  const email = headers.join("\r\n") + "\r\n\r\n" + body;
+  let email = headers.join("\r\n") + "\r\n\r\n";
+
+  // Body Part
+  email += `--${boundary}\r\n`;
+  email += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
+  email += body + "\r\n\r\n";
+
+  // Attachments
+  for (const attachment of attachments) {
+    email += `--${boundary}\r\n`;
+    email += `Content-Type: ${attachment.contentType}; name="${attachment.filename}"\r\n`;
+    email += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n`;
+    email += `Content-Transfer-Encoding: base64\r\n\r\n`;
+    email += attachment.content.toString("base64") + "\r\n\r\n";
+  }
+
+  email += `--${boundary}--`;
+
   return Buffer.from(email).toString("base64url");
 }
 
@@ -128,7 +154,8 @@ export async function sendEmail(
   subject: string,
   body: string,
   threadId?: string,
-  inReplyToMessageId?: string
+  inReplyToMessageId?: string,
+  attachments: Attachment[] = []
 ): Promise<{ messageId: string; threadId: string }> {
   const oauth2Client = await getAuthenticatedClient(userId);
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
@@ -136,7 +163,7 @@ export async function sendEmail(
   const integration = await storage.getIntegration(userId, "gmail");
   const fromEmail = (integration?.metadata as any)?.email || "me";
 
-  const raw = createRawEmail(to, fromEmail, subject, body, threadId, inReplyToMessageId);
+  const raw = createRawEmail(to, fromEmail, subject, body, threadId, inReplyToMessageId, attachments);
 
   const sendParams: any = {
     userId: "me",

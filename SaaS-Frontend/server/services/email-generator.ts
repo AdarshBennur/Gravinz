@@ -6,8 +6,9 @@ interface EmailGenerationInput {
   contactName: string;
   contactCompany?: string;
   contactRole?: string;
-  isFollowup?: boolean;
-  followupNumber?: number;
+  isFollowup: boolean;
+  followupNumber: number;
+  resumeUrl?: string; // Added for attachment context
 }
 
 interface GeneratedEmail {
@@ -72,7 +73,7 @@ async function getPreviousEmails(userId: string, contactId: string): Promise<str
 }
 
 export async function generateEmail(input: EmailGenerationInput): Promise<GeneratedEmail> {
-  const { userId, contactId, contactName, contactCompany, contactRole, isFollowup, followupNumber } = input;
+  const { userId, contactId, contactName, contactCompany, contactRole, isFollowup, followupNumber, resumeUrl } = input;
 
   const profileContext = await buildProfileContext(userId);
 
@@ -82,13 +83,16 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
   }
 
   const recipientContext = `
-## Recipient Details
-Name: ${contactName}
-Role: ${contactRole || "Hiring Manager"}
-Company: ${contactCompany || "Unknown Company"}
-Type: ${isFollowup ? `Follow-up #${followupNumber}` : "First Connection"}
-${interactionContext}
-`;
+  ## Recipient Details
+  Name: ${contactName}
+  Role: ${contactRole || "Hiring Manager"}
+  Company: ${contactCompany || "Unknown Company"}
+  Type: ${isFollowup ? `Follow-up #${followupNumber}` : "First Connection"}
+  ${interactionContext}
+  `;
+
+  // Explicitly note resume attachment in context for AI
+  const resumeContext = resumeUrl ? "\nRESUME: A PDF resume is attached to this email. You MUST mention it." : "";
 
   try {
     const OpenAI = (await import("openai")).default;
@@ -100,30 +104,33 @@ ${interactionContext}
     }
 
     const systemPrompt = `
-You are an expert career outreach assistant processing a job application email.
+    You are an expert career outreach assistant processing a job application email.
 
-## Your Goal
-Write a highly personalized, human-sounding cold email (or follow-up) from the Sender to the Recipient.
+    ## Your Goal
+    Write a highly personalized, human-sounding cold email (or follow-up) from the Sender to the Recipient.
 
-## Rules
-1. **Analyze First**: Before writing, Reason about how the Sender's experience fits the Recipient's company/role.
-2. **No Templates**: Do not use generic placeholders like "[Company Name]". Use provided data.
-3. **Be Specific**: Reference specific projects or skills from the Sender that matter to *this* Recipient.
-4. **Tone**: Match the Sender's preference.
-5. **Length**: Keep it concise (under 150 words).
-6. **Follow-ups**: If this is a follow-up, acknowledge previous silence politely but pivot to a new value add. Do NOT just say "checking in".
-7. **Formatting**: Return JSON with "reasoning", "subject", and "body".
+    ## Rules
+    1. **Analyze First**: Before writing, Reason about how the Sender's experience fits the Recipient's company/role.
+    2. **No Templates**: Do not use generic placeholders like "[Company Name]". Use provided data.
+    3. **Be Specific**: Reference specific projects or skills from the Sender that matter to *this* Recipient.
+    4. **Tone**: Match the Sender's preference.
+    5. **Length**: Keep it concise (under 150 words).
+    6. **Follow-ups**: If this is a follow-up, acknowledge previous silence politely but pivot to a new value add. Do NOT just say "checking in".
+    7. **Resume**: ${resumeUrl ? "You MUST mention that you have attached your resume." : "Do not mention a resume integration logic error."}
+    8. **Formatting**: Return JSON with "reasoning", "subject", and "body".
+    9. **Structure**: Body should be HTML (p, br, b tags only).
 
-## Input Data
-${profileContext}
-${recipientContext}
-`;
+    ## Input Data
+    ${profileContext}
+    ${recipientContext}
+    ${resumeContext}
+    `;
 
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: `Generate the ${isFollowup ? `Follow-up email #${followupNumber}` : "First cold email"} for ${contactName}.` }
+        { role: "user", content: `Generate the ${isFollowup ? `Follow-up email #${followupNumber}` : "First cold email"} for ${contactName}${resumeUrl ? " (Resume Attached)" : ""}.` }
       ],
       response_format: { type: "json_object" },
       temperature: 0.7,
@@ -142,11 +149,12 @@ ${recipientContext}
     return {
       subject: parsed.subject,
       body: cleanBody,
+      fallback: false,
     };
 
   } catch (error: any) {
-    console.error("AI Generation failed/skipped, falling back to basic template:", error.message);
-    return generateFallbackEmail(input, profileContext);
+    console.error("AI Generation failed:", error.message);
+    throw new Error("Failed to generate email via AI (Strict Mode: Fallback Disabled).");
   }
 }
 

@@ -245,13 +245,39 @@ export async function importContactsFromNotion(
         // Default name to email username or "Unknown" (for display only)
         const contactName = name || (email ? email.split('@')[0] : "Unknown");
 
+        // Extract well-known fields for top-level columns (Company, Role, Status)
+        // We prioritise the user's mapped columns, then fall back to common names.
+
+        let company: string | null = null;
+        if (columnMapping?.company) {
+          company = notionData[columnMapping.company] || null;
+        } else {
+          company = extractNotionProperty(notionData, ["Company", "Organization", "Business"]);
+        }
+
+        let role: string | null = null;
+        if (columnMapping?.role) {
+          role = notionData[columnMapping.role] || null;
+        } else {
+          role = extractNotionProperty(notionData, ["Role", "Job Title", "Position", "Title"]);
+        }
+
+        let status: string | null = null;
+        if (columnMapping?.status) {
+          const rawStatus = notionData[columnMapping.status];
+          if (rawStatus) status = mapNotionStatusToInternal(rawStatus);
+        } else {
+          const rawStatus = extractNotionProperty(notionData, ["Status", "State", "Stage"]);
+          if (rawStatus) status = mapNotionStatusToInternal(rawStatus);
+        }
+
         // Store complete Notion row with ALL columns + preserve order
         const newContact = await storage.createContact(userId, {
           name: contactName,
           email: email, // Validated as not null above
-          company: null, // Not using fixed columns for Notion imports anymore
-          role: null,
-          status: null, // Not using status column for Notion imports
+          company: company,
+          role: role,
+          status: status || "not-sent", // Default to 'not-sent' if no status found (per spec "not applied" -> First email)
           source: "notion",
           notionPageId: page.id,
           notionData: notionData, // Complete Notion row (all columns)
@@ -278,33 +304,6 @@ export async function importContactsFromNotion(
 
   console.log(`[Notion Import] COMPLETE - Imported: ${imported}, Skipped: ${skipped}, Errors: ${errors.length}`);
   return { imported, skipped, errors };
-}
-
-function extractNotionProperty(properties: Record<string, any>, possibleNames: string[]): string | null {
-  // Try exact match first
-  for (const name of possibleNames) {
-    const prop = properties[name];
-    if (prop) {
-      const value = extractNotionValue(prop);
-      if (value) return value;
-    }
-  }
-
-  // Try case-insensitive match as fallback
-  const lowerProps: Record<string, any> = {};
-  for (const key in properties) {
-    lowerProps[key.toLowerCase()] = properties[key];
-  }
-
-  for (const name of possibleNames) {
-    const prop = lowerProps[name.toLowerCase()];
-    if (prop) {
-      const value = extractNotionValue(prop);
-      if (value) return value;
-    }
-  }
-
-  return null;
 }
 
 function extractNotionValue(prop: any): string | null {
@@ -346,6 +345,37 @@ function extractNotionValue(prop: any): string | null {
 
   // Trim and ensure no null/undefined
   return value ? value.trim() : null;
+}
+
+function mapNotionStatusToInternal(notionStatus: string): string {
+  const s = notionStatus.toLowerCase().trim();
+  if (s === "not applied" || s === "to apply" || s === "new") return "not-sent";
+  if (s === "applied" || s === "first email sent" || s === "sent") return "sent"; // Schema uses 'sent' for first email
+  if (s === "follow-up 1" || s === "follow-up 1 sent") return "followup-1"; // Schema uses 'followup-1'
+  if (s === "follow-up 2" || s === "follow-up 2 sent") return "followup-2"; // Schema uses 'followup-2'
+  if (s === "replied" || s === "interview") return "replied";
+  if (s === "rejected" || s === "bounced") return "bounced";
+  return "not-sent"; // Default safe fallback
+}
+
+function extractNotionProperty(data: Record<string, any>, candidates: string[]): string | null {
+  // Try exact match first
+  for (const c of candidates) {
+    if (data[c]) return data[c];
+  }
+
+  // Try case-insensitive match
+  const lowerData: Record<string, any> = {};
+  for (const key in data) {
+    if (data[key]) lowerData[key.toLowerCase()] = data[key];
+  }
+
+  for (const c of candidates) {
+    const val = lowerData[c.toLowerCase()];
+    if (val) return val;
+  }
+
+  return null;
 }
 
 export async function syncContactStatusToNotion(
