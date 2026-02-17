@@ -35,17 +35,6 @@ type Contact = {
   notionRowOrder?: number; // Preserves row order from Notion
 };
 
-const statusLabel: Record<string, string> = {
-  replied: "Replied",
-  followup: "Follow-up",
-  "followup-1": "Follow-Up 1",
-  "followup-2": "Follow-Up 2",
-  "not-sent": "Not Applied",
-  sent: "First Email Sent",
-  bounced: "Bounced",
-  paused: "Paused",
-};
-
 const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   replied: "default",
   sent: "secondary",
@@ -60,7 +49,7 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "o
 function StatusBadge({ status }: { status: ContactStatus }) {
   return (
     <Badge variant={statusVariant[status] || "secondary"} className="rounded-full" data-testid={`status-contact-${status}`}>
-      {statusLabel[status] ?? status}
+      {status}
     </Badge>
   );
 }
@@ -94,6 +83,7 @@ export default function ContactsPage() {
     mutationFn: (data: typeof form) => apiPost("/api/contacts", data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/threads"] });
       toast({ title: "Contact added" });
       setOpen(false);
       setForm({ name: "", email: "", company: "", role: "", status: "not-sent" });
@@ -107,6 +97,7 @@ export default function ContactsPage() {
     mutationFn: (id: string) => apiDelete(`/api/contacts/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/threads"] });
       toast({ title: "Contact deleted" });
     },
     onError: (err: Error) => {
@@ -131,6 +122,7 @@ export default function ContactsPage() {
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/threads"] });
       const msg = `Imported ${data.imported} contacts${data.skipped ? `, ${data.skipped} skipped` : ""}`;
       toast({ title: "CSV Import Complete", description: msg });
       setCsvOpen(false);
@@ -365,7 +357,7 @@ export default function ContactsPage() {
                 <TabsTrigger value="all" data-testid="tab-all">All</TabsTrigger>
                 <TabsTrigger value="replied" data-testid="tab-replied">Replied</TabsTrigger>
                 <TabsTrigger value="sent" data-testid="tab-sent">Sent</TabsTrigger>
-                <TabsTrigger value="not-sent" data-testid="tab-not-sent">Not Applied</TabsTrigger>
+                <TabsTrigger value="not-sent" data-testid="tab-not-sent">Not Sent</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>

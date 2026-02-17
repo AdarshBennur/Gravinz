@@ -118,6 +118,7 @@ export default function IntegrationsPage() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
       queryClient.invalidateQueries({ queryKey: ["/api/integrations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/threads"] });
       toast({
         title: "Notion Import Complete",
         description: `Imported ${result.imported} contacts${result.skipped ? `, ${result.skipped} skipped` : ""}`,
@@ -134,6 +135,7 @@ export default function IntegrationsPage() {
     mutationFn: () => apiPost<any>("/api/integrations/notion/sync", {}),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/threads"] });
       toast({
         title: "Notion Sync Complete",
         description: `Synced ${result.imported} contacts${result.skipped ? `, ${result.skipped} skipped` : ""}`,

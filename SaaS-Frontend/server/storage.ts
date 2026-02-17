@@ -16,7 +16,7 @@ import {
   type DailyUsage,
   type Integration,
   type ActivityLogEntry,
-} from "@shared/schema";
+} from "../shared/schema.ts";
 
 // ─── camelCase ↔ snake_case helpers ─────────────────────────────
 function toSnake(str: string): string {
@@ -105,6 +105,8 @@ export interface IStorage {
     totalReplies: number;
     replyRate: number;
   }>;
+
+  acquireAutomationLock(contactId: string, userId: string, currentStatus: string, lockStatus: string): Promise<boolean>;
 }
 
 // ─── Supabase PostgREST Storage Implementation ─────────────────
@@ -597,6 +599,25 @@ export class DatabaseStorage implements IStorage {
       .select("user_id")
       .eq("automation_status", "running");
     return data ? data.map((r: any) => r.user_id) : [];
+  }
+
+  async acquireAutomationLock(contactId: string, userId: string, currentStatus: string, lockStatus: string): Promise<boolean> {
+    // Atomically update status only if it matches currentStatus
+    const { data, error } = await supabaseAdmin
+      .from("contacts")
+      .update({ status: lockStatus, updated_at: new Date().toISOString() })
+      .eq("id", contactId)
+      .eq("user_id", userId)
+      .eq("status", currentStatus)
+      .select();
+
+    if (error) {
+      console.error("[Storage] Failed to acquire lock:", error);
+      return false;
+    }
+
+    // If data returned, it means the update happened (we got the lock)
+    return data && data.length > 0;
   }
 }
 

@@ -1,5 +1,5 @@
 import { Client } from "@notionhq/client";
-import { storage } from "../storage";
+import { storage } from "../storage.ts";
 import { encryptToken, decryptToken } from "./encryption";
 
 function getNotionOAuthConfig() {

@@ -1,5 +1,5 @@
 import { google } from "googleapis";
-import { storage } from "../storage";
+import { storage } from "../storage.ts";
 import { encryptToken, decryptToken } from "./encryption";
 
 const SCOPES = [
@@ -75,14 +75,21 @@ async function getAuthenticatedClient(userId: string) {
   const accessToken = decryptToken(integration.accessToken);
   const refreshToken = integration.refreshToken ? decryptToken(integration.refreshToken) : null;
 
+  // Ensure tokenExpiresAt is a Date object
+  let expiryDate = integration.tokenExpiresAt;
+  if (expiryDate && typeof expiryDate === 'string') {
+    expiryDate = new Date(expiryDate);
+  }
+
   const oauth2Client = getOAuth2Client();
   oauth2Client.setCredentials({
     access_token: accessToken,
     refresh_token: refreshToken,
-    expiry_date: integration.tokenExpiresAt?.getTime(),
+    expiry_date: expiryDate?.getTime(),
   });
 
-  if (integration.tokenExpiresAt && new Date() >= integration.tokenExpiresAt) {
+  if (expiryDate && new Date() >= expiryDate) {
+    console.log(`[Gmail Debug] Token expired at ${expiryDate.toISOString()}, refreshing...`);
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
 
@@ -93,9 +100,10 @@ async function getAuthenticatedClient(userId: string) {
       await storage.upsertIntegration(userId, "gmail", {
         accessToken: newAccessToken,
         refreshToken: newRefreshToken,
-        tokenExpiresAt: credentials.expiry_date ? new Date(credentials.expiry_date) : integration.tokenExpiresAt,
+        tokenExpiresAt: credentials.expiry_date ? new Date(credentials.expiry_date) : expiryDate,
       });
       oauth2Client.setCredentials(credentials);
+      console.log(`[Gmail Debug] Token refreshed successfully.`);
     } catch (err) {
       console.error("Token refresh failed:", err);
       throw new Error("Gmail token expired and refresh failed. Please reconnect Gmail.");
@@ -157,29 +165,55 @@ export async function sendEmail(
   inReplyToMessageId?: string,
   attachments: Attachment[] = []
 ): Promise<{ messageId: string; threadId: string }> {
-  const oauth2Client = await getAuthenticatedClient(userId);
-  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
-
-  const integration = await storage.getIntegration(userId, "gmail");
-  const fromEmail = (integration?.metadata as any)?.email || "me";
-
-  const raw = createRawEmail(to, fromEmail, subject, body, threadId, inReplyToMessageId, attachments);
-
-  const sendParams: any = {
-    userId: "me",
-    requestBody: { raw },
-  };
-
-  if (threadId) {
-    sendParams.requestBody.threadId = threadId;
+  if (process.env.MOCK_GMAIL === "true") {
+    console.log(`[Gmail Mock] Sending email to ${to} (Subject: ${subject})`);
+    return {
+      messageId: "mock_msg_" + Date.now(),
+      threadId: threadId || "mock_thread_" + Date.now(),
+    };
   }
+  console.log(`[Gmail Debug] Preparing to send email to: ${to}, Subject: ${subject}`);
 
-  const result = await gmail.users.messages.send(sendParams);
+  try {
+    const oauth2Client = await getAuthenticatedClient(userId);
+    console.log(`[Gmail Debug] OAuth2 Client obtained. ClientId: ${oauth2Client._clientId}`);
 
-  return {
-    messageId: result.data.id || "",
-    threadId: result.data.threadId || "",
-  };
+    const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+    const integration = await storage.getIntegration(userId, "gmail");
+    const fromEmail = (integration?.metadata as any)?.email || "me";
+    console.log(`[Gmail Debug] Sending as: ${fromEmail}`);
+
+    const raw = createRawEmail(to, fromEmail, subject, body, threadId, inReplyToMessageId, attachments);
+    console.log(`[Gmail Debug] Raw email constructed. Length: ${raw.length} chars`);
+
+    const sendParams: any = {
+      userId: "me",
+      requestBody: { raw },
+    };
+
+    if (threadId) {
+      sendParams.requestBody.threadId = threadId;
+      console.log(`[Gmail Debug] Threading enabled. Thread ID: ${threadId}`);
+    }
+
+    console.log(`[Gmail Debug] Sending payload to Gmail API...`);
+    const result = await gmail.users.messages.send(sendParams);
+
+    console.log(`[Gmail Debug] Gmail API Response Status: ${result.status}`);
+    console.log(`[Gmail Debug] Sent Message ID: ${result.data.id}, Thread ID: ${result.data.threadId}`);
+
+    return {
+      messageId: result.data.id || "",
+      threadId: result.data.threadId || "",
+    };
+  } catch (error: any) {
+    console.error("[Gmail Debug] CRITICAL SEND FAILURE:", error);
+    if (error.response) {
+      console.error("[Gmail Debug] API Error Response:", JSON.stringify(error.response.data, null, 2));
+    }
+    throw error;
+  }
 }
 
 export async function checkForReplies(userId: string): Promise<Array<{
@@ -188,6 +222,10 @@ export async function checkForReplies(userId: string): Promise<Array<{
   messageId: string;
   snippet: string;
 }>> {
+  if (process.env.MOCK_GMAIL === "true") {
+    console.log("[Gmail Mock] Checking for replies... (Mocking no replies)");
+    return [];
+  }
   const oauth2Client = await getAuthenticatedClient(userId);
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
@@ -206,6 +244,7 @@ export async function checkForReplies(userId: string): Promise<Array<{
     });
 
     const messages = response.data.messages || [];
+    console.log(`[Gmail Debug] Found ${messages.length} messages in inbox (newer_than:1d).`);
 
     for (const msg of messages) {
       if (!msg.id) continue;
@@ -223,6 +262,8 @@ export async function checkForReplies(userId: string): Promise<Array<{
         const emailMatch = from.match(/<(.+?)>/) || [null, from];
         const senderEmail = (emailMatch[1] || from).toLowerCase().trim();
         const threadId = detail.data.threadId || "";
+
+        console.log(`[Gmail Debug] Analyzing Msg ${msg.id} | Thread ${threadId} | From: ${senderEmail}`);
 
         replies.push({
           contactEmail: senderEmail,

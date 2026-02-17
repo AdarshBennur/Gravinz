@@ -13,7 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { apiGet, apiPut, apiPost, apiDelete } from "@/lib/api";
+import { apiGet, apiPut, apiPost, apiDelete, getAccessToken } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 
 function TagInput({
@@ -191,8 +191,15 @@ export default function ProfileSettingsPage() {
     formData.append('file', file);
 
     try {
+      const token = getAccessToken();
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
       const res = await fetch('/api/profile/resume', {
         method: 'POST',
+        headers,
         body: formData,
       });
 

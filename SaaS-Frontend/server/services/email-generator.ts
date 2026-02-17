@@ -1,4 +1,4 @@
-import { storage } from "../storage";
+import { storage } from "../storage.ts";
 
 interface EmailGenerationInput {
   userId: string;
@@ -96,12 +96,15 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
 
   try {
     const OpenAI = (await import("openai")).default;
-    const openai = new OpenAI();
     const apiKey = process.env.OPENAI_API_KEY;
+    console.log(`[Email Generator] Initializing OpenAI. Key present: ${!!apiKey}`);
 
     if (!apiKey) {
       throw new Error("OpenAI API key missing");
     }
+
+    const openai = new OpenAI({ apiKey });
+
 
     const systemPrompt = `
     You are an expert career outreach assistant processing a job application email.

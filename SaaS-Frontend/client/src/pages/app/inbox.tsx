@@ -21,7 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ScrollArea } from "@/components/ui/scroll-area";
+
 import { apiGet } from "@/lib/api";
 
 interface ThreadListItem {
@@ -74,18 +74,10 @@ interface ThreadDetail {
   analytics: { delivered: number; opened: number; replied: number; total: number };
 }
 
-const statusLabel: Record<string, string> = {
-  "not-sent": "Not Applied",
-  sent: "First Email Sent",
-  "followup-1": "Follow-Up 1",
-  "followup-2": "Follow-Up 2",
-  followup: "Follow-Up",
-  replied: "Replied",
-  bounced: "Bounced",
-  paused: "Paused",
-};
+// Removed statusLabel mapping
 
 const statusVariant: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  // Internal normalized status values
   replied: "default",
   sent: "secondary",
   "followup-1": "secondary",
@@ -93,6 +85,25 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "o
   "not-sent": "outline",
   bounced: "destructive",
   paused: "outline",
+  // Raw Notion status values (displayed for Notion-imported contacts)
+  "Not Applied": "outline",
+  "First Email": "secondary",
+  "First Email Sent": "secondary",
+  "Applied": "secondary",
+  "Follow-Up 1": "secondary",
+  "Follow-up 1": "secondary",
+  "Follow-Up 1 Sent": "secondary",
+  "Follow-Up 2": "secondary",
+  "Follow-up 2": "secondary",
+  "Follow-Up 2 Sent": "secondary",
+  "Replied": "default",
+  "Interview": "default",
+  "Rejected": "destructive",
+  "Bounced": "destructive",
+  "To Apply": "outline",
+  "New": "outline",
+  "Sent": "secondary",
+  "Paused": "outline",
 };
 
 function formatTime(dateStr: string | null): string {
@@ -166,9 +177,9 @@ export default function InboxPage() {
 
   return (
     <AppShell title="Inbox" subtitle="View conversations, track opens, and manage replies.">
-      <div className="grid h-[calc(100dvh-180px)] gap-0 overflow-hidden rounded-2xl border bg-background/50 backdrop-blur lg:grid-cols-[320px_1fr_300px]">
+      <div className="flex h-[calc(100vh-6rem)] overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
         {/* LEFT SIDEBAR - Contact List */}
-        <div className="flex flex-col border-r">
+        <div className="flex w-full flex-col border-r md:w-[320px] shrink-0">
           <div className="p-3 border-b">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -181,7 +192,7 @@ export default function InboxPage() {
             </div>
           </div>
 
-          <ScrollArea className="flex-1">
+          <div className="flex-1 overflow-y-auto min-h-0">
             {threadsLoading ? (
               <div className="p-3 space-y-3">
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -238,7 +249,7 @@ export default function InboxPage() {
                           variant={statusVariant[t.status] || "secondary"}
                           className="rounded-full text-[10px] px-1.5 py-0"
                         >
-                          {statusLabel[t.status] || t.status}
+                          {t.status || "—"}
                         </Badge>
                       </div>
                     </div>
@@ -246,11 +257,11 @@ export default function InboxPage() {
                 ))}
               </div>
             )}
-          </ScrollArea>
+          </div>
         </div>
 
         {/* MIDDLE PANEL - Conversation Thread */}
-        <div className="flex flex-col min-w-0">
+        <div className="flex flex-1 flex-col min-w-0 min-h-0 border-r">
           {!activeContactId ? (
             <div className="flex-1 grid place-items-center text-muted-foreground text-sm">
               Select a contact to view conversation
@@ -273,11 +284,11 @@ export default function InboxPage() {
                   <div className="text-xs text-muted-foreground">{detail.contact.email}</div>
                 </div>
                 <Badge variant={statusVariant[detail.contact.status] || "secondary"} className="rounded-full">
-                  {statusLabel[detail.contact.status] || detail.contact.status}
+                  {detail.contact.status || "—"}
                 </Badge>
               </div>
 
-              <ScrollArea className="flex-1">
+              <div className="flex-1 overflow-y-auto min-h-0">
                 <div className="p-4 space-y-4">
                   {detail.thread.length === 0 ? (
                     <div className="text-center text-sm text-muted-foreground py-12">
@@ -333,15 +344,15 @@ export default function InboxPage() {
                     ))
                   )}
                 </div>
-              </ScrollArea>
+              </div>
             </>
           )}
         </div>
 
         {/* RIGHT PANEL - Contact Details & Analytics */}
-        <div className="hidden lg:flex flex-col border-l">
+        <div className="hidden w-[300px] flex-col shrink-0 lg:flex">
           {detail ? (
-            <ScrollArea className="flex-1">
+            <div className="flex-1 overflow-y-auto min-h-0">
               <div className="p-4 space-y-5">
                 <div>
                   <div className="flex items-center gap-3">
@@ -415,7 +426,7 @@ export default function InboxPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-muted-foreground">Status</span>
                       <Badge variant={statusVariant[detail.contact.status] || "secondary"} className="rounded-full text-[10px]">
-                        {statusLabel[detail.contact.status] || detail.contact.status}
+                        {detail.contact.status || "—"}
                       </Badge>
                     </div>
                     <div className="flex items-center justify-between">
@@ -431,7 +442,7 @@ export default function InboxPage() {
                   </div>
                 </div>
               </div>
-            </ScrollArea>
+            </div>
           ) : (
             <div className="flex-1 grid place-items-center text-muted-foreground text-sm p-4">
               Select a contact to view details

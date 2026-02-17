@@ -1207,13 +1207,27 @@ export async function registerRoutes(
           const opened = sends.filter((s) => s.status === "opened" || s.status === "replied" || s.openedAt).length;
           const replied = sends.filter((s) => s.status === "replied" || s.repliedAt).length;
 
-          return {
+          // STRICT SINGLE SOURCE OF TRUTH:
+          // For Notion contacts: display the raw Notion status from notionData
+          // (this matches what the Contacts page renders via dynamic columns)
+          // For non-Notion contacts: use contact.status from the database
+          const notionData = (contact as any).notionData as Record<string, any> | null;
+          let displayStatus = contact.status;
+          if (contact.source === "notion" && notionData) {
+            const statusKey = Object.keys(notionData).find(k => k.toLowerCase() === "status")
+              || Object.keys(notionData).find(k => k.toLowerCase() === "state");
+            if (statusKey && notionData[statusKey]) {
+              displayStatus = notionData[statusKey];
+            }
+          }
+
+          const threadObj = {
             contactId: contact.id,
             name: contact.name,
             email: contact.email,
             company: contact.company,
             role: contact.role,
-            status: contact.status,
+            status: displayStatus, // Notion value or DB value
             source: contact.source,
             lastMessage: latestSend
               ? {
@@ -1228,6 +1242,8 @@ export async function registerRoutes(
             messageCount: sends.length,
             analytics: { delivered, opened, replied },
           };
+
+          return threadObj;
         })
         .sort((a, b) => {
           if (a.unread && !b.unread) return -1;
@@ -1271,6 +1287,17 @@ export async function registerRoutes(
         direction: "outbound" as const,
       }));
 
+      // Use raw Notion status if available (matches Contacts page display)
+      const detailNotionData = (contact as any).notionData as Record<string, any> | null;
+      let detailDisplayStatus = contact.status;
+      if (contact.source === "notion" && detailNotionData) {
+        const statusKey = Object.keys(detailNotionData).find(k => k.toLowerCase() === "status")
+          || Object.keys(detailNotionData).find(k => k.toLowerCase() === "state");
+        if (statusKey && detailNotionData[statusKey]) {
+          detailDisplayStatus = detailNotionData[statusKey];
+        }
+      }
+      
       res.json({
         contact: {
           id: contact.id,
@@ -1278,7 +1305,7 @@ export async function registerRoutes(
           email: contact.email,
           company: contact.company,
           role: contact.role,
-          status: contact.status,
+          status: detailDisplayStatus,
           source: contact.source,
           followupsSent: contact.followupsSent,
           lastSentAt: contact.lastSentAt,
