@@ -191,6 +191,8 @@ export async function importContactsFromNotion(
         }
 
         console.log(`[Notion Import] Row ${rowNumber} - Extracted ${columnOrder.length} columns in schema order`);
+        // DIAGNOSTIC: Log exact property keys from this Notion page
+        console.log(`[COLUMN KEYS] Row ${rowNumber}: ${JSON.stringify(Object.keys(props))}`);
 
         // Extract email for duplicate checking (if column mapping exists, use it; otherwise auto-detect)
         let email: string | null = null;
@@ -273,82 +275,60 @@ export async function importContactsFromNotion(
 
         // ─── EXTRACT DATE FIELDS FROM NOTION ─────────────────────────────────
         // These MUST be populated when status implies they should exist.
-        // Dates come from notionData via the configured column mapping.
         let firstEmailDate: Date | null = null;
         let followup1Date: Date | null = null;
         let followup2Date: Date | null = null;
 
-        // Extract firstEmailDate
         const firstEmailDateKey = columnMapping?.firstEmailDate || "First Email Date";
-        const rawFirstEmailDate = notionData[firstEmailDateKey];
-        if (rawFirstEmailDate) {
-          const parsed = new Date(rawFirstEmailDate);
-          if (!isNaN(parsed.getTime())) {
-            firstEmailDate = parsed;
-          } else {
-            console.warn(`[Notion Import] Row ${rowNumber}: Invalid firstEmailDate value "${rawFirstEmailDate}"`);
-          }
-        }
-
-        // Extract followup1Date
         const followup1DateKey = columnMapping?.followup1Date || "Follow-up 1 Date";
-        const rawFollowup1Date = notionData[followup1DateKey];
-        if (rawFollowup1Date) {
-          const parsed = new Date(rawFollowup1Date);
-          if (!isNaN(parsed.getTime())) {
-            followup1Date = parsed;
+        const followup2DateKey = columnMapping?.followup2Date || "Follow-up 2 Date";
+
+        // ─── DATE DIAGNOSTIC: Log raw Notion property type + value ───────────
+        for (const dKey of [firstEmailDateKey, followup1DateKey, followup2DateKey]) {
+          const rawProp = props[dKey];
+          if (rawProp) {
+            console.log(`[DATE DIAGNOSTIC] Row ${rowNumber} (${email}): Column "${dKey}" → type="${rawProp.type}", raw=${JSON.stringify(rawProp).substring(0, 200)}`);
           } else {
-            console.warn(`[Notion Import] Row ${rowNumber}: Invalid followup1Date value "${rawFollowup1Date}"`);
+            console.warn(`[DATE DIAGNOSTIC] Row ${rowNumber} (${email}): Column "${dKey}" → NOT FOUND in props. Available keys: ${JSON.stringify(Object.keys(props))}`);
           }
+          console.log(`[DATE DIAGNOSTIC] notionData["${dKey}"] = ${JSON.stringify(notionData[dKey])}`);
         }
 
-        // Extract followup2Date
-        const followup2DateKey = columnMapping?.followup2Date || "Follow-up 2 Date";
-        const rawFollowup2Date = notionData[followup2DateKey];
-        if (rawFollowup2Date) {
-          const parsed = new Date(rawFollowup2Date);
-          if (!isNaN(parsed.getTime())) {
-            followup2Date = parsed;
-          } else {
-            console.warn(`[Notion Import] Row ${rowNumber}: Invalid followup2Date value "${rawFollowup2Date}"`);
-          }
-        }
+        // Step 1: Try extracting from notionData (already processed by extractNotionValue)
+        // Step 2: If null, try extracting directly from raw Notion property (fallback)
+        firstEmailDate = safeParseDateValue(notionData[firstEmailDateKey]) || extractDateFromRawProperty(props[firstEmailDateKey]);
+        followup1Date = safeParseDateValue(notionData[followup1DateKey]) || extractDateFromRawProperty(props[followup1DateKey]);
+        followup2Date = safeParseDateValue(notionData[followup2DateKey]) || extractDateFromRawProperty(props[followup2DateKey]);
+
+        console.log(`[DATE EXTRACTION RESULT] Row ${rowNumber} (${email}): firstEmailDate=${firstEmailDate?.toISOString() || "NULL"}, followup1Date=${followup1Date?.toISOString() || "NULL"}, followup2Date=${followup2Date?.toISOString() || "NULL"}`);
 
         // ─── DATA CONSISTENCY VALIDATION ─────────────────────────────────────
-        // If status implies dates should exist but they don't, log warning
-        // and repair by downgrading status to match available dates.
+        // STATUS IS NEVER DOWNGRADED. If dates are missing, we log loudly
+        // but preserve the original status from Notion. The import layer
+        // must NEVER silently alter status due to extraction failure.
         const effectiveStatus = status || "not-sent";
-        let validatedStatus = effectiveStatus;
+        const validatedStatus = effectiveStatus; // PRESERVED — no mutation
 
         if (effectiveStatus === "sent" && !firstEmailDate) {
-          console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="sent" but firstEmailDate is NULL. Resetting status to "not-sent".`);
-          validatedStatus = "not-sent";
+          console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="sent" but firstEmailDate extraction FAILED. STATUS PRESERVED as "sent". Check column name "${firstEmailDateKey}" and property type.`);
         } else if (effectiveStatus === "followup-1") {
           if (!firstEmailDate) {
-            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-1" but firstEmailDate is NULL. Resetting status to "not-sent".`);
-            validatedStatus = "not-sent";
-          } else if (!followup1Date) {
-            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-1" but followup1Date is NULL. Resetting status to "sent".`);
-            validatedStatus = "sent";
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-1" but firstEmailDate extraction FAILED. STATUS PRESERVED. Check column "${firstEmailDateKey}".`);
+          }
+          if (!followup1Date) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-1" but followup1Date extraction FAILED. STATUS PRESERVED. Check column "${followup1DateKey}".`);
           }
         } else if (effectiveStatus === "followup-2") {
           if (!firstEmailDate) {
-            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-2" but firstEmailDate is NULL. Resetting status to "not-sent".`);
-            validatedStatus = "not-sent";
-          } else if (!followup1Date) {
-            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-2" but followup1Date is NULL. Resetting status to "sent".`);
-            validatedStatus = "sent";
-          } else if (!followup2Date) {
-            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-2" but followup2Date is NULL. Resetting status to "followup-1".`);
-            validatedStatus = "followup-1";
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-2" but firstEmailDate extraction FAILED. STATUS PRESERVED. Check column "${firstEmailDateKey}".`);
+          }
+          if (!followup1Date) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-2" but followup1Date extraction FAILED. STATUS PRESERVED. Check column "${followup1DateKey}".`);
+          }
+          if (!followup2Date) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-2" but followup2Date extraction FAILED. STATUS PRESERVED. Check column "${followup2DateKey}".`);
           }
         }
-
-        if (validatedStatus !== effectiveStatus) {
-          console.warn(`[DATA REPAIR] Row ${rowNumber} (${email}): Status corrected from "${effectiveStatus}" to "${validatedStatus}"`);
-        }
-
-        console.log(`[Notion Import] Row ${rowNumber} dates: firstEmailDate=${firstEmailDate?.toISOString()?.split("T")[0] || "NULL"}, followup1Date=${followup1Date?.toISOString()?.split("T")[0] || "NULL"}, followup2Date=${followup2Date?.toISOString()?.split("T")[0] || "NULL"}`);
 
         // Extract jobLink
         let jobLink: string | null = null;
@@ -410,26 +390,134 @@ function extractNotionValue(prop: any): string | null {
       value = prop.phone_number || null;
       break;
     case "select":
-      // Store selected option name as plain text
       value = prop.select?.name || null;
       break;
     case "multi_select":
-      // Store multiple options as comma-separated string
       value = prop.multi_select?.map((opt: any) => opt.name).join(", ") || null;
       break;
     case "url":
       value = prop.url || null;
       break;
     case "date":
-      // Extract ISO date string
+      // ISO date string, timezone-safe
       value = prop.date?.start || null;
       break;
+    case "formula":
+      // Formulas can return date, string, number, or boolean
+      if (prop.formula?.type === "date") value = prop.formula.date?.start || null;
+      else if (prop.formula?.type === "string") value = prop.formula.string || null;
+      else if (prop.formula?.type === "number") value = prop.formula.number?.toString() || null;
+      else if (prop.formula?.type === "boolean") value = prop.formula.boolean?.toString() || null;
+      break;
+    case "rollup":
+      // Rollups contain arrays; extract first element
+      if (prop.rollup?.type === "array" && prop.rollup.array?.length > 0) {
+        const first = prop.rollup.array[0];
+        if (first?.type === "date") value = first.date?.start || null;
+        else value = extractNotionValue(first);
+      } else if (prop.rollup?.type === "number") {
+        value = prop.rollup.number?.toString() || null;
+      } else if (prop.rollup?.type === "date") {
+        value = prop.rollup.date?.start || null;
+      }
+      break;
+    case "created_time":
+      // ISO 8601 timestamp with timezone (e.g. "2026-02-18T09:00:00.000Z")
+      value = prop.created_time || null;
+      break;
+    case "last_edited_time":
+      value = prop.last_edited_time || null;
+      break;
+    case "number":
+      value = prop.number != null ? prop.number.toString() : null;
+      break;
+    case "checkbox":
+      value = prop.checkbox != null ? prop.checkbox.toString() : null;
+      break;
+    case "status":
+      // Notion's native Status property type
+      value = prop.status?.name || null;
+      break;
+    case "people":
+      value = prop.people?.map((p: any) => p.name || p.id).join(", ") || null;
+      break;
+    case "files":
+      value = prop.files?.[0]?.file?.url || prop.files?.[0]?.external?.url || null;
+      break;
+    case "relation":
+      value = prop.relation?.map((r: any) => r.id).join(", ") || null;
+      break;
     default:
+      console.warn(`[extractNotionValue] Unhandled property type: "${prop.type}". Returning null.`);
       value = null;
   }
 
-  // Trim and ensure no null/undefined
+  // Trim strings, preserve null
   return value ? value.trim() : null;
+}
+
+/**
+ * Parse a string or Date value into a Date object, timezone-safe.
+ * Returns null if parsing fails. Always stores as UTC.
+ */
+function safeParseDateValue(raw: any): Date | null {
+  if (!raw) return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+  if (typeof raw === "string") {
+    // Handle date-only strings ("2026-02-18") by treating as UTC midnight
+    const dateOnlyMatch = raw.match(/^\d{4}-\d{2}-\d{2}$/);
+    if (dateOnlyMatch) {
+      const d = new Date(raw + "T00:00:00.000Z");
+      return isNaN(d.getTime()) ? null : d;
+    }
+    // Full ISO string — parse directly
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
+ * Fallback: extract a Date directly from a raw Notion property object.
+ * Handles all property types that can contain a date.
+ * Used when extractNotionValue() + notionData lookup both fail.
+ */
+function extractDateFromRawProperty(prop: any): Date | null {
+  if (!prop || !prop.type) return null;
+
+  let isoString: string | null = null;
+
+  switch (prop.type) {
+    case "date":
+      isoString = prop.date?.start || null;
+      break;
+    case "formula":
+      if (prop.formula?.type === "date") isoString = prop.formula.date?.start || null;
+      else if (prop.formula?.type === "string") isoString = prop.formula.string || null;
+      break;
+    case "rollup":
+      if (prop.rollup?.type === "array" && prop.rollup.array?.length > 0) {
+        const first = prop.rollup.array[0];
+        if (first?.type === "date") isoString = first.date?.start || null;
+      } else if (prop.rollup?.type === "date") {
+        isoString = prop.rollup.date?.start || null;
+      }
+      break;
+    case "created_time":
+      isoString = prop.created_time || null;
+      break;
+    case "last_edited_time":
+      isoString = prop.last_edited_time || null;
+      break;
+    case "rich_text":
+      // Sometimes dates stored as text
+      isoString = prop.rich_text?.[0]?.plain_text || null;
+      break;
+    default:
+      return null;
+  }
+
+  return safeParseDateValue(isoString);
 }
 
 function mapNotionStatusToInternal(notionStatus: string): string {
