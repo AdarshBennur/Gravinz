@@ -182,9 +182,17 @@ export async function sendEmail(
 
     const integration = await storage.getIntegration(userId, "gmail");
     const fromEmail = (integration?.metadata as any)?.email || "me";
-    console.log(`[Gmail Debug] Sending as: ${fromEmail}`);
 
-    const raw = createRawEmail(to, fromEmail, subject, body, threadId, inReplyToMessageId, attachments);
+    // Build display-name From header using user's full name from profile.
+    // Falls back to plain email if fullName is not set.
+    const user = await storage.getUser(userId);
+    const displayName = user?.fullName?.trim();
+    const fromHeader = displayName
+      ? `"${displayName}" <${fromEmail}>`
+      : fromEmail;
+    console.log(`[Gmail Debug] Sending as: ${fromHeader}`);
+
+    const raw = createRawEmail(to, fromHeader, subject, body, threadId, inReplyToMessageId, attachments);
     console.log(`[Gmail Debug] Raw email constructed. Length: ${raw.length} chars`);
 
     const sendParams: any = {

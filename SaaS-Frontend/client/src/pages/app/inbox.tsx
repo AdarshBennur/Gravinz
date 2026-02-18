@@ -210,17 +210,9 @@ export default function InboxPage() {
                           ? t.lastMessage.subject || t.lastMessage.bodyPreview
                           : "No messages yet"}
                       </span>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {t.messageCount > 0 && (
-                          <span className="text-[10px] text-muted-foreground">{t.messageCount}</span>
-                        )}
-                        <Badge
-                          variant={statusVariant[t.status] || "secondary"}
-                          className="rounded-full text-[10px] px-1.5 py-0"
-                        >
-                          {t.status || "—"}
-                        </Badge>
-                      </div>
+                      {t.messageCount > 0 && (
+                        <span className="text-[10px] text-muted-foreground shrink-0">{t.messageCount}</span>
+                      )}
                     </div>
                   </button>
                 ))}
