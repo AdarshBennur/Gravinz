@@ -214,13 +214,64 @@ export async function processUserAutomation(userId: string) {
 
   let processedCount = 0;
   const maxFollowups = settings.followupCount ?? 2;
-  const delays = (settings.followupDelays as number[]) || [2, 4];
 
-  for (const contact of contacts) {
+  // ─── SAFE JSONB PARSING ──────────────────────────────────────────────────
+  // followupDelays is stored as JSONB. Drizzle may return it as:
+  //   - number[] (correct)
+  //   - string (if serialized incorrectly, e.g. "[2,4]")
+  //   - null/undefined
+  // We MUST defensively parse it.
+  let delays: number[] = [2, 4]; // fallback default
+  const rawDelays = settings.followupDelays;
+  if (Array.isArray(rawDelays)) {
+    delays = rawDelays;
+  } else if (typeof rawDelays === "string") {
+    try {
+      const parsed = JSON.parse(rawDelays);
+      if (Array.isArray(parsed)) {
+        delays = parsed;
+      }
+    } catch {
+      console.error(`[AUTOMATION DEBUG] Failed to parse followupDelays string: "${rawDelays}". Using default [2, 4].`);
+    }
+  } else if (rawDelays != null) {
+    console.error(`[AUTOMATION DEBUG] Unexpected followupDelays type: ${typeof rawDelays}. Using default [2, 4].`);
+  }
+
+  console.log(`[AUTOMATION DEBUG] Campaign settings for user ${userId}:`);
+  console.log(`  maxFollowups=${maxFollowups}`);
+  console.log(`  followupDelays=${JSON.stringify(delays)}`);
+  console.log(`  dailyLimit=${dailyLimit}, sentToday=${sentToday}, remainingQuota=${remainingQuota}`);
+  console.log(`  Total contacts=${contacts.length}`);
+
+  // ─── SORT CONTACTS: FOLLOWUP-ELIGIBLE FIRST ──────────────────────────────
+  // Critical: if not-sent contacts appear first, they consume the entire cycle
+  // and followup-eligible contacts never get processed within the 5-min window.
+  // Priority: followup-1 > sent > not-sent (followups before first sends)
+  const statusPriority: Record<string, number> = {
+    "followup-1": 0,  // highest priority — these have been waiting longest
+    "sent": 1,        // next — eligible for followup-1
+    "not-sent": 2,    // lowest — first emails can wait
+  };
+  const sortedContacts = [...contacts].sort((a, b) => {
+    const pa = statusPriority[a.status || ""] ?? 99;
+    const pb = statusPriority[b.status || ""] ?? 99;
+    return pa - pb;
+  });
+
+  for (const contact of sortedContacts) {
     if (processedCount >= remainingQuota) break;
 
     // Terminal states — skip permanently
-    if (["replied", "bounced", "stopped", "manual_break", "failed"].includes(contact.status || "")) continue;
+    if (["replied", "bounced", "stopped", "manual_break", "failed", "rejected"].includes(contact.status || "")) continue;
+
+    // ─── PER-CONTACT DEBUG LOG ──────────────────────────────────────────────
+    console.log(`[AUTOMATION DEBUG] Evaluating contact: ${contact.email}`);
+    console.log(`  status=${contact.status}`);
+    console.log(`  firstEmailDate=${contact.firstEmailDate || "NULL"}`);
+    console.log(`  followup1Date=${contact.followup1Date || "NULL"}`);
+    console.log(`  followup2Date=${contact.followup2Date || "NULL"}`);
+    console.log(`  campaignDelays=${JSON.stringify(delays)}`);
 
     let targetAction: {
       type: "first" | "followup1" | "followup2";
@@ -232,21 +283,20 @@ export async function processUserAutomation(userId: string) {
     } | null = null;
 
     // ─── STATE MACHINE ───────────────────────────────────────────────────────
-    // Status strings UNCHANGED: not-sent → sent → followup-1 → followup-2 → replied
+    // Status strings UNCHANGED: not-sent → sent → followup-1 → followup-2
     //
     // STRICT RULES:
     //   STATE 1 (not-sent):   firstEmailDate MUST be null. Eligible immediately.
-    //   STATE 2 (sent):       Eligibility = daysSince(firstEmailDate) >= delay[0]
+    //   STATE 2 (sent):       Eligibility = daysSince(firstEmailDate) >= delays[0]
     //                         Reference MUST be firstEmailDate — NEVER lastSentAt.
-    //   STATE 3 (followup-1): Eligibility = daysSince(followup1Date) >= delay[1]
+    //   STATE 3 (followup-1): Eligibility = daysSince(followup1Date) >= delays[1]
     //                         Reference MUST be followup1Date — NEVER lastSentAt.
-    //   STATE 4 (followup-2): Terminal — skip.
+    //   STATE 4 (followup-2): If no more followups → status = "rejected". Terminal.
     // ─────────────────────────────────────────────────────────────────────────
     switch (contact.status) {
       case "not-sent":
         // STATE 1: Send first email. firstEmailDate must be null.
         if (contact.firstEmailDate !== null && contact.firstEmailDate !== undefined) {
-          // Data inconsistency — status says not-sent but date is already set. Skip.
           console.warn(`[AUTOMATION] SKIP ${contact.email}: status="not-sent" but firstEmailDate already set (${contact.firstEmailDate}). Data inconsistency.`);
           continue;
         }
@@ -255,55 +305,85 @@ export async function processUserAutomation(userId: string) {
           isFollowup: false,
           number: 0,
           lockStatus: "sending_first",
-          referenceDate: null, // no delay check needed
+          referenceDate: null,
           delayDays: 0,
         };
+        console.log(`[AUTOMATION DEBUG] ${contact.email}: Eligible for FIRST email (immediate).`);
         break;
 
       case "sent":
         // STATE 2: Send Follow-up 1.
-        // Reference date MUST be firstEmailDate — no fallback allowed.
+        // Reference date MUST be firstEmailDate — no fallback.
         if (!contact.firstEmailDate) {
-          console.warn(`[AUTOMATION] SKIP ${contact.email}: status="sent" but firstEmailDate is NULL. Cannot determine eligibility.`);
+          console.error(`[AUTOMATION] SKIP ${contact.email}: status="sent" but firstEmailDate is NULL. Cannot determine followup-1 eligibility.`);
           continue;
         }
-        if (maxFollowups >= 1) {
-          targetAction = {
-            type: "followup1",
-            isFollowup: true,
-            number: 1,
-            lockStatus: "sending_f1",
-            referenceDate: contact.firstEmailDate, // STRICT: only firstEmailDate
-            delayDays: delays[0] ?? 2,
-          };
+        if (maxFollowups < 1) {
+          console.log(`[AUTOMATION DEBUG] ${contact.email}: maxFollowups=${maxFollowups}, no followups configured. Moving to rejected.`);
+          await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
+          await tryNotionSync(userId, contact.id, "rejected", {
+            firstEmailDate: contact.firstEmailDate,
+            followup1Date: null,
+            followup2Date: null,
+          });
+          continue;
         }
+        targetAction = {
+          type: "followup1",
+          isFollowup: true,
+          number: 1,
+          lockStatus: "sending_f1",
+          referenceDate: contact.firstEmailDate, // STRICT: only firstEmailDate
+          delayDays: delays[0] ?? 2,
+        };
         break;
 
       case "followup-1":
         // STATE 3: Send Follow-up 2.
-        // Reference date MUST be followup1Date — no fallback allowed.
+        // Reference date MUST be followup1Date — no fallback.
         if (!contact.firstEmailDate) {
-          console.warn(`[AUTOMATION] SKIP ${contact.email}: status="followup-1" but firstEmailDate is NULL. Data inconsistency.`);
+          console.error(`[AUTOMATION] SKIP ${contact.email}: status="followup-1" but firstEmailDate is NULL. Data inconsistency.`);
           continue;
         }
         if (!contact.followup1Date) {
-          console.warn(`[AUTOMATION] SKIP ${contact.email}: status="followup-1" but followup1Date is NULL. Cannot determine eligibility.`);
+          console.error(`[AUTOMATION] SKIP ${contact.email}: status="followup-1" but followup1Date is NULL. Cannot determine followup-2 eligibility.`);
           continue;
         }
-        if (maxFollowups >= 2) {
-          targetAction = {
-            type: "followup2",
-            isFollowup: true,
-            number: 2,
-            lockStatus: "sending_f2",
-            referenceDate: contact.followup1Date, // STRICT: only followup1Date
-            delayDays: delays[1] ?? 4,
-          };
+        if (maxFollowups < 2) {
+          console.log(`[AUTOMATION DEBUG] ${contact.email}: maxFollowups=${maxFollowups}, no followup-2 configured. Moving to rejected.`);
+          await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
+          await tryNotionSync(userId, contact.id, "rejected", {
+            firstEmailDate: contact.firstEmailDate,
+            followup1Date: contact.followup1Date,
+            followup2Date: null,
+          });
+          continue;
         }
+        targetAction = {
+          type: "followup2",
+          isFollowup: true,
+          number: 2,
+          lockStatus: "sending_f2",
+          referenceDate: contact.followup1Date, // STRICT: only followup1Date
+          delayDays: delays[1] ?? 4,
+        };
         break;
 
       case "followup-2":
-        // STATE 4: Terminal — no more follow-ups.
+        // STATE 4: No more follow-ups. If no reply, mark rejected.
+        if (contact.status === "followup-2") {
+          console.log(`[AUTOMATION DEBUG] ${contact.email}: status="followup-2", no more followups. Moving to rejected.`);
+          await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
+          await tryNotionSync(userId, contact.id, "rejected", {
+            firstEmailDate: contact.firstEmailDate ?? null,
+            followup1Date: contact.followup1Date ?? null,
+            followup2Date: contact.followup2Date ?? null,
+          });
+        }
+        continue;
+
+      default:
+        console.log(`[AUTOMATION DEBUG] ${contact.email}: Unknown status "${contact.status}". Skipping.`);
         continue;
     }
 
@@ -326,11 +406,15 @@ export async function processUserAutomation(userId: string) {
         `  eligible=${eligible}`
       );
 
-      if (!eligible) continue; // Not time yet — skip silently after logging
+      if (!eligible) {
+        console.log(`[AUTOMATION DEBUG] ${contact.email}: Not eligible yet. Skipping.`);
+        continue;
+      }
+
+      console.log(`[AUTOMATION DEBUG] ${contact.email}: ELIGIBLE — proceeding to send.`);
     }
 
     // ─── CONCURRENCY LOCK ─────────────────────────────────────────────────────
-    // Prevents double-send if two workers run simultaneously
     const locked = await storage.acquireAutomationLock(contact.id, userId, contact.status!, targetAction.lockStatus);
     if (!locked) {
       console.log(`[Automation] Could not acquire lock for ${contact.email}, skipping.`);
@@ -399,7 +483,6 @@ export async function processUserAutomation(userId: string) {
 
       // ── COMMIT SUCCESS ────────────────────────────────────────────────────
       // ONLY after confirmed Gmail success do we transition state.
-      // updateContactAfterSend is idempotent — safe on retry.
       await updateContactAfterSend(contact, targetAction.type, userId);
 
       // Log the email send record
@@ -420,19 +503,18 @@ export async function processUserAutomation(userId: string) {
       });
 
       processedCount++;
+      console.log(`[AUTOMATION] Successfully processed ${sendType} for ${contact.email}. Total this cycle: ${processedCount}`);
 
       // Strict 60s delay between sends (anti-spam)
       await new Promise((resolve) => setTimeout(resolve, 60000));
 
     } catch (error: any) {
       // ── ROLLBACK / FAILURE ────────────────────────────────────────────────
-      // Log full diagnostic context for transport-layer debugging
-      console.error(`[ERROR] Failed to sync status after send for ${contact.email}`);
+      console.error(`[ERROR] Failed to send ${sendType} for ${contact.email}`);
       console.error(`[ERROR] DB before: { status: "${contact.status}", firstEmailDate: ${contact.firstEmailDate}, followup1Date: ${contact.followup1Date}, followup2Date: ${contact.followup2Date} }`);
       console.error(`[ERROR] Error: ${error.message}`);
       console.error(error);
 
-      // Mark as failed so the contact doesn't loop infinitely
       await storage.updateContact(contact.id, userId, { status: "failed" } as any);
 
       await storage.createEmailSend(userId, contact.id, {
@@ -451,6 +533,8 @@ export async function processUserAutomation(userId: string) {
       emailsSent: (freshUsage?.emailsSent ?? 0) + processedCount,
     });
     console.log(`[Automation] User ${userId}: Processed ${processedCount} emails this cycle`);
+  } else {
+    console.log(`[Automation] User ${userId}: No emails sent this cycle. All contacts either terminal, ineligible, or quota exhausted.`);
   }
 }
 
