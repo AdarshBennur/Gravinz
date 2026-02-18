@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 import { queryClient } from "./lib/queryClient";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { TimezoneProvider } from "@/hooks/use-timezone";
 
 import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/auth/login";
@@ -68,10 +69,12 @@ export default function App() {
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <TooltipProvider>
           <AuthProvider>
-            <Toaster />
-            <div className="min-h-dvh app-bg transition-colors duration-500">
-              <Router />
-            </div>
+            <TimezoneProvider>
+              <Toaster />
+              <div className="min-h-dvh app-bg transition-colors duration-500">
+                <Router />
+              </div>
+            </TimezoneProvider>
           </AuthProvider>
         </TooltipProvider>
       </ThemeProvider>
