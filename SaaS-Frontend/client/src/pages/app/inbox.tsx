@@ -23,6 +23,8 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { apiGet } from "@/lib/api";
+import { useTimezone } from "@/hooks/use-timezone";
+import { formatThreadTime, formatFullDate } from "@/lib/date-utils";
 
 interface ThreadListItem {
   contactId: string;
@@ -106,40 +108,6 @@ const statusVariant: Record<string, "default" | "secondary" | "destructive" | "o
   "Paused": "outline",
 };
 
-function formatTime(dateStr: string | null): string {
-  if (!dateStr) return "";
-  try {
-    const d = new Date(dateStr);
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    if (days === 0) {
-      return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
-    } else if (days === 1) {
-      return "Yesterday";
-    } else if (days < 7) {
-      return d.toLocaleDateString("en-US", { weekday: "short" });
-    }
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  } catch {
-    return "";
-  }
-}
-
-function formatFullDate(dateStr: string | null): string {
-  if (!dateStr) return "";
-  try {
-    return new Date(dateStr).toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
-}
 
 function EmailStatusIcon({ status }: { status: string | null }) {
   switch (status) {
@@ -161,6 +129,7 @@ function EmailStatusIcon({ status }: { status: string | null }) {
 export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const tz = useTimezone();
 
   const { data: threads = [], isLoading: threadsLoading } = useQuery<ThreadListItem[]>({
     queryKey: ["/api/inbox/threads", search],
@@ -227,7 +196,7 @@ export default function InboxPage() {
                         </span>
                       </div>
                       <span className="text-[10px] text-muted-foreground shrink-0">
-                        {formatTime(t.lastMessage?.sentAt || null)}
+                        {formatThreadTime(t.lastMessage?.sentAt || null, tz)}
                       </span>
                     </div>
                     {t.company && (
@@ -306,7 +275,7 @@ export default function InboxPage() {
                             </span>
                           </div>
                           <span className="text-[10px] text-muted-foreground">
-                            {formatFullDate(msg.sentAt)}
+                            {formatFullDate(msg.sentAt, tz)}
                           </span>
                         </div>
 
@@ -326,12 +295,12 @@ export default function InboxPage() {
                           )}
                           {msg.openedAt && (
                             <span className="flex items-center gap-1">
-                              <MailOpen className="h-3 w-3 text-blue-500" /> Opened {formatTime(msg.openedAt)}
+                              <MailOpen className="h-3 w-3 text-blue-500" /> Opened {formatThreadTime(msg.openedAt, tz)}
                             </span>
                           )}
                           {msg.repliedAt && (
                             <span className="flex items-center gap-1">
-                              <Reply className="h-3 w-3 text-green-500" /> Replied {formatTime(msg.repliedAt)}
+                              <Reply className="h-3 w-3 text-green-500" /> Replied {formatThreadTime(msg.repliedAt, tz)}
                             </span>
                           )}
                           {msg.status === "bounced" && (
@@ -384,7 +353,7 @@ export default function InboxPage() {
                   )}
                   <div className="flex items-center gap-2 text-sm">
                     <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground">Added {formatFullDate(detail.contact.createdAt)}</span>
+                    <span className="text-muted-foreground">Added {formatFullDate(detail.contact.createdAt, tz)}</span>
                   </div>
                   {detail.contact.source && (
                     <div className="flex items-center gap-2 text-sm">
@@ -436,7 +405,7 @@ export default function InboxPage() {
                     {detail.contact.lastSentAt && (
                       <div className="flex items-center justify-between">
                         <span className="text-muted-foreground">Last sent</span>
-                        <span className="text-xs">{formatFullDate(detail.contact.lastSentAt)}</span>
+                        <span className="text-xs">{formatFullDate(detail.contact.lastSentAt, tz)}</span>
                       </div>
                     )}
                   </div>
