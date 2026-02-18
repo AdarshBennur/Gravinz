@@ -517,9 +517,13 @@ export async function registerRoutes(
     try {
       const userId = getUserId(req);
 
-      // Safety: reject if an automation send cycle is actively in progress
-      // to avoid race conditions with contacts being processed.
-      if (isAutomationRunning()) {
+      // Safety: check the DB automationStatus for THIS user.
+      // The DB is the single source of truth — if the user paused automation
+      // in the UI, the DB reflects that immediately.
+      // We do NOT use the in-memory sendCycleRunning flag because it is
+      // shared across all users and can be briefly true during a 5-min cron tick.
+      const settings = await storage.getCampaignSettings(userId);
+      if (settings?.automationStatus === "running") {
         return res.status(409).json({
           message:
             "Automation is currently running. Please pause it before clearing contacts.",
