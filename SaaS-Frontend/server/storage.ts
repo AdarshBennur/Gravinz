@@ -71,6 +71,7 @@ export interface IStorage {
   createContact(userId: string, data: InsertContact): Promise<Contact>;
   updateContact(id: string, userId: string, data: Partial<InsertContact>): Promise<Contact | undefined>;
   deleteContact(id: string, userId: string): Promise<boolean>;
+  clearAllContacts(userId: string): Promise<number>;
 
   getCampaignSettings(userId: string): Promise<CampaignSettings | undefined>;
   upsertCampaignSettings(userId: string, data: InsertCampaignSettings): Promise<CampaignSettings>;
@@ -375,6 +376,20 @@ export class DatabaseStorage implements IStorage {
       .eq("id", id)
       .eq("user_id", userId);
     return !error && (count ?? 0) > 0;
+  }
+
+  /**
+   * Hard-delete ALL contacts for a user from the local database.
+   * This is a local purge only — Notion is never called or modified.
+   * Returns the number of rows deleted.
+   */
+  async clearAllContacts(userId: string): Promise<number> {
+    const { error, count } = await supabaseAdmin
+      .from("contacts")
+      .delete({ count: "exact" })
+      .eq("user_id", userId);
+    if (error) throw new Error(`Failed to clear contacts: ${error.message}`);
+    return count ?? 0;
   }
 
   // ─── Campaign Settings ─────────────────────────────────────
