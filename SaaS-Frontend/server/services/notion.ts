@@ -271,25 +271,110 @@ export async function importContactsFromNotion(
           if (rawStatus) status = mapNotionStatusToInternal(rawStatus);
         }
 
+        // ─── EXTRACT DATE FIELDS FROM NOTION ─────────────────────────────────
+        // These MUST be populated when status implies they should exist.
+        // Dates come from notionData via the configured column mapping.
+        let firstEmailDate: Date | null = null;
+        let followup1Date: Date | null = null;
+        let followup2Date: Date | null = null;
+
+        // Extract firstEmailDate
+        const firstEmailDateKey = columnMapping?.firstEmailDate || "First Email Date";
+        const rawFirstEmailDate = notionData[firstEmailDateKey];
+        if (rawFirstEmailDate) {
+          const parsed = new Date(rawFirstEmailDate);
+          if (!isNaN(parsed.getTime())) {
+            firstEmailDate = parsed;
+          } else {
+            console.warn(`[Notion Import] Row ${rowNumber}: Invalid firstEmailDate value "${rawFirstEmailDate}"`);
+          }
+        }
+
+        // Extract followup1Date
+        const followup1DateKey = columnMapping?.followup1Date || "Follow-up 1 Date";
+        const rawFollowup1Date = notionData[followup1DateKey];
+        if (rawFollowup1Date) {
+          const parsed = new Date(rawFollowup1Date);
+          if (!isNaN(parsed.getTime())) {
+            followup1Date = parsed;
+          } else {
+            console.warn(`[Notion Import] Row ${rowNumber}: Invalid followup1Date value "${rawFollowup1Date}"`);
+          }
+        }
+
+        // Extract followup2Date
+        const followup2DateKey = columnMapping?.followup2Date || "Follow-up 2 Date";
+        const rawFollowup2Date = notionData[followup2DateKey];
+        if (rawFollowup2Date) {
+          const parsed = new Date(rawFollowup2Date);
+          if (!isNaN(parsed.getTime())) {
+            followup2Date = parsed;
+          } else {
+            console.warn(`[Notion Import] Row ${rowNumber}: Invalid followup2Date value "${rawFollowup2Date}"`);
+          }
+        }
+
+        // ─── DATA CONSISTENCY VALIDATION ─────────────────────────────────────
+        // If status implies dates should exist but they don't, log warning
+        // and repair by downgrading status to match available dates.
+        const effectiveStatus = status || "not-sent";
+        let validatedStatus = effectiveStatus;
+
+        if (effectiveStatus === "sent" && !firstEmailDate) {
+          console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="sent" but firstEmailDate is NULL. Resetting status to "not-sent".`);
+          validatedStatus = "not-sent";
+        } else if (effectiveStatus === "followup-1") {
+          if (!firstEmailDate) {
+            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-1" but firstEmailDate is NULL. Resetting status to "not-sent".`);
+            validatedStatus = "not-sent";
+          } else if (!followup1Date) {
+            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-1" but followup1Date is NULL. Resetting status to "sent".`);
+            validatedStatus = "sent";
+          }
+        } else if (effectiveStatus === "followup-2") {
+          if (!firstEmailDate) {
+            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-2" but firstEmailDate is NULL. Resetting status to "not-sent".`);
+            validatedStatus = "not-sent";
+          } else if (!followup1Date) {
+            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-2" but followup1Date is NULL. Resetting status to "sent".`);
+            validatedStatus = "sent";
+          } else if (!followup2Date) {
+            console.warn(`[DATA INCONSISTENCY] Row ${rowNumber} (${email}): status="followup-2" but followup2Date is NULL. Resetting status to "followup-1".`);
+            validatedStatus = "followup-1";
+          }
+        }
+
+        if (validatedStatus !== effectiveStatus) {
+          console.warn(`[DATA REPAIR] Row ${rowNumber} (${email}): Status corrected from "${effectiveStatus}" to "${validatedStatus}"`);
+        }
+
+        console.log(`[Notion Import] Row ${rowNumber} dates: firstEmailDate=${firstEmailDate?.toISOString()?.split("T")[0] || "NULL"}, followup1Date=${followup1Date?.toISOString()?.split("T")[0] || "NULL"}, followup2Date=${followup2Date?.toISOString()?.split("T")[0] || "NULL"}`);
+
+        // Extract jobLink
+        let jobLink: string | null = null;
+        if (columnMapping?.jobLink) {
+          jobLink = notionData[columnMapping.jobLink] || null;
+        }
+
         // Store complete Notion row with ALL columns + preserve order
         const newContact = await storage.createContact(userId, {
           name: contactName,
-          email: email, // Validated as not null above
+          email: email,
           company: company,
           role: role,
-          status: status || "not-sent", // Default to 'not-sent' if no status found (per spec "not applied" -> First email)
+          status: validatedStatus,
           source: "notion",
           notionPageId: page.id,
-          notionData: notionData, // Complete Notion row (all columns)
-          notionRowOrder: rowNumber, // Preserve original row order
-          notionColumnOrder: columnOrder, // Preserve original column order
-          firstEmailDate: null,
-          followup1Date: null,
-          followup2Date: null,
-          jobLink: null,
+          notionData: notionData,
+          notionRowOrder: rowNumber,
+          notionColumnOrder: columnOrder,
+          firstEmailDate: firstEmailDate,
+          followup1Date: followup1Date,
+          followup2Date: followup2Date,
+          jobLink: jobLink,
         } as any);
 
-        console.log(`[Notion Import] Row ${rowNumber} - IMPORTED successfully: ${email}`);
+        console.log(`[Notion Import] Row ${rowNumber} - IMPORTED successfully: ${email} (status="${validatedStatus}")`);
         imported++;
       } catch (e: any) {
         const errorMsg = `Row ${rowNumber}: Error - ${e.message}`;

@@ -18,7 +18,7 @@ import {
 import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./services/gmail";
 import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
-import { startAutomationScheduler, stopAutomationScheduler } from "./services/automation";
+import { startAutomationScheduler, stopAutomationScheduler, repairContactDates } from "./services/automation";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 import { campaignSettings } from "@shared/schema";
@@ -780,6 +780,26 @@ export async function registerRoutes(
   });
 
 
+  // ─── DATA REPAIR ENDPOINT ──────────────────────────────────────────────────
+  // Fixes corrupted contacts from Notion imports where status is set but dates are NULL.
+  // Call this once to repair existing data inconsistencies.
+  app.post("/api/automation/repair-dates", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      console.log(`[Data Repair] Starting repair for user: ${userId}`);
+      const result = await repairContactDates(userId);
+      res.json({
+        message: `Repaired ${result.repaired} contacts`,
+        repaired: result.repaired,
+        details: result.details,
+      });
+    } catch (error: any) {
+      console.error("Repair dates error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+
   app.get("/api/dashboard", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -1297,7 +1317,7 @@ export async function registerRoutes(
           detailDisplayStatus = detailNotionData[statusKey];
         }
       }
-      
+
       res.json({
         contact: {
           id: contact.id,

@@ -538,6 +538,78 @@ export async function processUserAutomation(userId: string) {
   }
 }
 
+// ─── DATA REPAIR FUNCTION ──────────────────────────────────────────────────────
+// Repairs corrupted contacts where status implies dates should exist but they're NULL.
+// This happens when contacts are imported from Notion without date extraction.
+// ────────────────────────────────────────────────────────────────────────────────
+export async function repairContactDates(userId: string): Promise<{ repaired: number; details: string[] }> {
+  const contacts = await storage.getContacts(userId);
+  let repaired = 0;
+  const details: string[] = [];
+
+  for (const contact of contacts) {
+    const updates: Record<string, any> = {};
+    const notionData = (contact as any).notionData as Record<string, any> | null;
+
+    // Helper: try to extract date from notionData, fallback to createdAt
+    const extractDate = (key: string): Date | null => {
+      if (notionData && notionData[key]) {
+        const parsed = new Date(notionData[key]);
+        if (!isNaN(parsed.getTime())) return parsed;
+      }
+      return null;
+    };
+
+    const status = contact.status;
+
+    if (status === "sent" && !contact.firstEmailDate) {
+      const date = extractDate("First Email Date") || (contact.createdAt ? new Date(contact.createdAt) : new Date());
+      updates.firstEmailDate = date;
+      details.push(`[AUTOMATION REPAIR] ${contact.email}: status="sent", set firstEmailDate=${date.toISOString().split("T")[0]} (source: ${extractDate("First Email Date") ? "notionData" : "createdAt"})`);
+    }
+
+    if (status === "followup-1") {
+      if (!contact.firstEmailDate) {
+        const date = extractDate("First Email Date") || (contact.createdAt ? new Date(contact.createdAt) : new Date());
+        updates.firstEmailDate = date;
+        details.push(`[AUTOMATION REPAIR] ${contact.email}: status="followup-1", set firstEmailDate=${date.toISOString().split("T")[0]} (source: ${extractDate("First Email Date") ? "notionData" : "createdAt"})`);
+      }
+      if (!contact.followup1Date) {
+        const date = extractDate("Follow-up 1 Date") || (contact.createdAt ? new Date(contact.createdAt) : new Date());
+        updates.followup1Date = date;
+        details.push(`[AUTOMATION REPAIR] ${contact.email}: status="followup-1", set followup1Date=${date.toISOString().split("T")[0]} (source: ${extractDate("Follow-up 1 Date") ? "notionData" : "createdAt"})`);
+      }
+    }
+
+    if (status === "followup-2") {
+      if (!contact.firstEmailDate) {
+        const date = extractDate("First Email Date") || (contact.createdAt ? new Date(contact.createdAt) : new Date());
+        updates.firstEmailDate = date;
+        details.push(`[AUTOMATION REPAIR] ${contact.email}: status="followup-2", set firstEmailDate=${date.toISOString().split("T")[0]} (source: ${extractDate("First Email Date") ? "notionData" : "createdAt"})`);
+      }
+      if (!contact.followup1Date) {
+        const date = extractDate("Follow-up 1 Date") || (contact.createdAt ? new Date(contact.createdAt) : new Date());
+        updates.followup1Date = date;
+        details.push(`[AUTOMATION REPAIR] ${contact.email}: status="followup-2", set followup1Date=${date.toISOString().split("T")[0]} (source: ${extractDate("Follow-up 1 Date") ? "notionData" : "createdAt"})`);
+      }
+      if (!contact.followup2Date) {
+        const date = extractDate("Follow-up 2 Date") || (contact.createdAt ? new Date(contact.createdAt) : new Date());
+        updates.followup2Date = date;
+        details.push(`[AUTOMATION REPAIR] ${contact.email}: status="followup-2", set followup2Date=${date.toISOString().split("T")[0]} (source: ${extractDate("Follow-up 2 Date") ? "notionData" : "createdAt"})`);
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await storage.updateContact(contact.id, userId, updates as any);
+      repaired++;
+      console.log(`[AUTOMATION REPAIR] Repaired ${contact.email}: ${JSON.stringify(updates)}`);
+    }
+  }
+
+  console.log(`[AUTOMATION REPAIR] Complete. Repaired ${repaired} contacts for user ${userId}.`);
+  return { repaired, details };
+}
+
 function daysSince(dateVal: Date | string | null | undefined): number {
   if (!dateVal) return -1;
   const last = new Date(dateVal).getTime();
