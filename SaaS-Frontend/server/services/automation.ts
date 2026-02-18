@@ -687,5 +687,8 @@ async function tryNotionSync(
 }
 
 export function isAutomationRunning(): boolean {
-  return automationTask !== null;
+  // sendCycleRunning is true ONLY when a send cycle is actively mid-execution.
+  // automationTask !== null just means the cron scheduler is registered (always true
+  // after server start), so it is NOT a valid indicator of active processing.
+  return sendCycleRunning;
 }
