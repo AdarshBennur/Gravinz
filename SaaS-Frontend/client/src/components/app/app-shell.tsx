@@ -2,7 +2,6 @@ import { Link, useLocation } from "wouter";
 import {
   BarChart3,
   Compass,
-  Contact2,
   Inbox,
   Plug,
   Settings,
@@ -32,7 +31,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const nav = [
   { href: "/app/dashboard", label: "Dashboard", icon: Compass, testId: "nav-dashboard" },
-  { href: "/app/contacts", label: "Contacts", icon: Contact2, testId: "nav-contacts" },
   { href: "/app/inbox", label: "Inbox", icon: Inbox, testId: "nav-inbox" },
   { href: "/app/campaigns", label: "Campaigns", icon: SlidersHorizontal, testId: "nav-campaigns" },
   { href: "/app/analytics", label: "Analytics", icon: BarChart3, testId: "nav-analytics" },
@@ -173,7 +171,7 @@ function Topbar() {
                 </div>
               </div>
               <Separator className="my-4" />
-              <NavLinks onNavigate={() => {}} />
+              <NavLinks onNavigate={() => { }} />
             </SheetContent>
           </Sheet>
         </div>

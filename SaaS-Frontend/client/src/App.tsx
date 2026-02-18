@@ -11,7 +11,6 @@ import LoginPage from "@/pages/auth/login";
 import SignupPage from "@/pages/auth/signup";
 import ForgotPasswordPage from "@/pages/auth/forgot";
 import DashboardPage from "@/pages/app/dashboard";
-import ContactsPage from "@/pages/app/contacts";
 import CampaignSettingsPage from "@/pages/app/campaigns";
 import AnalyticsPage from "./pages/app/analytics";
 import IntegrationsPage from "@/pages/app/integrations";
@@ -51,7 +50,6 @@ function Router() {
 
       <Route path="/app" component={() => <Redirect to="/app/dashboard" />} />
       <Route path="/app/dashboard" component={() => <ProtectedRoute component={DashboardPage} />} />
-      <Route path="/app/contacts" component={() => <ProtectedRoute component={ContactsPage} />} />
       <Route path="/app/campaigns" component={() => <ProtectedRoute component={CampaignSettingsPage} />} />
       <Route path="/app/inbox" component={() => <ProtectedRoute component={InboxPage} />} />
       <Route path="/app/analytics" component={() => <ProtectedRoute component={AnalyticsPage} />} />
