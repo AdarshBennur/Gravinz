@@ -104,8 +104,8 @@ async function updateContactAfterSend(
 ): Promise<void> {
   const finalStatus =
     type === "first" ? "sent" :
-    type === "followup1" ? "followup-1" :
-    "followup-2";
+      type === "followup1" ? "followup-1" :
+        "followup-2";
 
   // IDEMPOTENCY GUARD 1: Re-fetch fresh state from DB (not stale in-memory copy)
   const fresh = await storage.getContact(contact.id, userId);
@@ -120,46 +120,62 @@ async function updateContactAfterSend(
   }
 
   const now = new Date();
+  const nowDateStr = now.toISOString().split("T")[0];
+
+  // ─── STRICT DATE ASSIGNMENT ───────────────────────────────────────────────
+  // Each transition sets EXACTLY ONE date field.
+  // NEVER touch other date fields. NEVER overwrite an existing date.
+  // ─────────────────────────────────────────────────────────────────────────
   const dateUpdates: Record<string, any> = {
     status: finalStatus,
     lastSentAt: now,
   };
 
-  // IDEMPOTENCY GUARD 3: Only set date if not already populated (preserve original timestamp)
   if (type === "first") {
-    if (!fresh.firstEmailDate) {
-      dateUpdates.firstEmailDate = now;
-      console.log(`[AUTOMATION] Setting firstEmailDate = ${now.toISOString()}`);
-    } else {
+    // STATE 1 → 2: Set firstEmailDate only. followup1Date and followup2Date untouched.
+    if (fresh.firstEmailDate) {
+      // Already set — idempotency: preserve original, do not overwrite
       console.log(`[AUTOMATION] firstEmailDate already set (${fresh.firstEmailDate}) — preserving original`);
+    } else {
+      dateUpdates.firstEmailDate = now;
+      console.log(`[AUTOMATION] Transition:\n  not-sent -> sent\n  Setting firstEmailDate=${nowDateStr}`);
     }
+    // Explicit safety: do NOT include followup1Date or followup2Date in this update
+
   } else if (type === "followup1") {
-    if (!fresh.followup1Date) {
-      dateUpdates.followup1Date = now;
-      console.log(`[AUTOMATION] Setting followup1Date = ${now.toISOString()}`);
-    } else {
+    // STATE 2 → 3: Set followup1Date only. firstEmailDate and followup2Date untouched.
+    if (fresh.followup1Date) {
       console.log(`[AUTOMATION] followup1Date already set (${fresh.followup1Date}) — preserving original`);
-    }
-  } else if (type === "followup2") {
-    if (!fresh.followup2Date) {
-      dateUpdates.followup2Date = now;
-      console.log(`[AUTOMATION] Setting followup2Date = ${now.toISOString()}`);
     } else {
-      console.log(`[AUTOMATION] followup2Date already set (${fresh.followup2Date}) — preserving original`);
+      dateUpdates.followup1Date = now;
+      console.log(`[AUTOMATION] Transition:\n  sent -> followup-1\n  Setting followup1Date=${nowDateStr}`);
     }
+    // Explicit safety: do NOT include firstEmailDate or followup2Date in this update
+
+  } else if (type === "followup2") {
+    // STATE 3 → 4: Set followup2Date only. firstEmailDate and followup1Date untouched.
+    if (fresh.followup2Date) {
+      console.log(`[AUTOMATION] followup2Date already set (${fresh.followup2Date}) — preserving original`);
+    } else {
+      dateUpdates.followup2Date = now;
+      console.log(`[AUTOMATION] Transition:\n  followup-1 -> followup-2\n  Setting followup2Date=${nowDateStr}`);
+    }
+    // Explicit safety: do NOT include firstEmailDate or followup1Date in this update
   }
 
-  // DB UPDATE — status + date in a single call (atomic at the storage layer)
+  // DB UPDATE — status + exactly one date field in a single atomic call
   console.log(`[AUTOMATION] Updating DB status -> "${finalStatus}" for ${contact.email}`);
   await storage.updateContact(contact.id, userId, dateUpdates);
   console.log(`[AUTOMATION] DB update complete for ${contact.email}`);
 
   // NOTION SYNC — best-effort, logged on error (never blocks the DB commit)
+  // Pass the full date picture so Notion reflects current state accurately.
+  // Only the newly-set date will be non-null in dateUpdates; others come from fresh.
   console.log(`[AUTOMATION] Updating Notion page -> "${finalStatus}" for ${contact.email}`);
   await tryNotionSync(userId, contact.id, finalStatus, {
-    firstEmailDate: dateUpdates.firstEmailDate ?? fresh.firstEmailDate ?? null,
-    followup1Date: dateUpdates.followup1Date ?? fresh.followup1Date ?? null,
-    followup2Date: dateUpdates.followup2Date ?? fresh.followup2Date ?? null,
+    firstEmailDate: (dateUpdates.firstEmailDate ?? fresh.firstEmailDate) ?? null,
+    followup1Date: (dateUpdates.followup1Date ?? fresh.followup1Date) ?? null,
+    followup2Date: (dateUpdates.followup2Date ?? fresh.followup2Date) ?? null,
   });
 
   console.log(`[AUTOMATION] Transition complete for ${contact.email}: "${contact.status}" -> "${finalStatus}"`);
@@ -211,68 +227,106 @@ export async function processUserAutomation(userId: string) {
       isFollowup: boolean;
       number: number;
       lockStatus: string;
-      delayDays?: number;
-      requiredDate?: Date | string | null;
+      delayDays: number;
+      referenceDate: Date | string | null;
     } | null = null;
 
     // ─── STATE MACHINE ───────────────────────────────────────────────────────
-    // Status strings are UNCHANGED from existing DB values.
-    // not-sent → sent → followup-1 → followup-2 → replied (terminal)
+    // Status strings UNCHANGED: not-sent → sent → followup-1 → followup-2 → replied
+    //
+    // STRICT RULES:
+    //   STATE 1 (not-sent):   firstEmailDate MUST be null. Eligible immediately.
+    //   STATE 2 (sent):       Eligibility = daysSince(firstEmailDate) >= delay[0]
+    //                         Reference MUST be firstEmailDate — NEVER lastSentAt.
+    //   STATE 3 (followup-1): Eligibility = daysSince(followup1Date) >= delay[1]
+    //                         Reference MUST be followup1Date — NEVER lastSentAt.
+    //   STATE 4 (followup-2): Terminal — skip.
     // ─────────────────────────────────────────────────────────────────────────
     switch (contact.status) {
       case "not-sent":
+        // STATE 1: Send first email. firstEmailDate must be null.
+        if (contact.firstEmailDate !== null && contact.firstEmailDate !== undefined) {
+          // Data inconsistency — status says not-sent but date is already set. Skip.
+          console.warn(`[AUTOMATION] SKIP ${contact.email}: status="not-sent" but firstEmailDate already set (${contact.firstEmailDate}). Data inconsistency.`);
+          continue;
+        }
         targetAction = {
           type: "first",
           isFollowup: false,
           number: 0,
           lockStatus: "sending_first",
-          requiredDate: null, // eligible immediately
+          referenceDate: null, // no delay check needed
+          delayDays: 0,
         };
         break;
 
-      case "sent": // Eligible for Follow-up 1
+      case "sent":
+        // STATE 2: Send Follow-up 1.
+        // Reference date MUST be firstEmailDate — no fallback allowed.
+        if (!contact.firstEmailDate) {
+          console.warn(`[AUTOMATION] SKIP ${contact.email}: status="sent" but firstEmailDate is NULL. Cannot determine eligibility.`);
+          continue;
+        }
         if (maxFollowups >= 1) {
           targetAction = {
             type: "followup1",
             isFollowup: true,
             number: 1,
             lockStatus: "sending_f1",
+            referenceDate: contact.firstEmailDate, // STRICT: only firstEmailDate
             delayDays: delays[0] ?? 2,
-            requiredDate: contact.firstEmailDate || contact.lastSentAt,
           };
         }
         break;
 
-      case "followup-1": // Eligible for Follow-up 2
+      case "followup-1":
+        // STATE 3: Send Follow-up 2.
+        // Reference date MUST be followup1Date — no fallback allowed.
+        if (!contact.firstEmailDate) {
+          console.warn(`[AUTOMATION] SKIP ${contact.email}: status="followup-1" but firstEmailDate is NULL. Data inconsistency.`);
+          continue;
+        }
+        if (!contact.followup1Date) {
+          console.warn(`[AUTOMATION] SKIP ${contact.email}: status="followup-1" but followup1Date is NULL. Cannot determine eligibility.`);
+          continue;
+        }
         if (maxFollowups >= 2) {
           targetAction = {
             type: "followup2",
             isFollowup: true,
             number: 2,
             lockStatus: "sending_f2",
+            referenceDate: contact.followup1Date, // STRICT: only followup1Date
             delayDays: delays[1] ?? 4,
-            requiredDate: contact.followup1Date || contact.lastSentAt,
           };
         }
         break;
+
+      case "followup-2":
+        // STATE 4: Terminal — no more follow-ups.
+        continue;
     }
 
     if (!targetAction) continue;
 
     // ─── DATE ELIGIBILITY CHECK ───────────────────────────────────────────────
+    // MANDATORY logging before every send decision.
     if (targetAction.isFollowup) {
-      if (!targetAction.requiredDate) {
-        // SAFETY: Contact is in follow-up eligible state but has no reference date.
-        // DO NOT send — log warning and skip. Prevents immediate accidental follow-ups.
-        console.warn(`[Automation Warning] Contact ${contact.email} is in status "${contact.status}" but has no reference date. Skipping.`);
-        continue;
-      }
+      const referenceDate = targetAction.referenceDate!;
+      const daysPassed = daysSince(referenceDate);
+      const required = targetAction.delayDays;
+      const eligible = daysPassed >= required;
 
-      const daysPassed = daysSince(targetAction.requiredDate);
-      if (daysPassed < (targetAction.delayDays || 999)) {
-        // Not time yet — silent skip
-        continue;
-      }
+      console.log(
+        `[AUTOMATION] Checking eligibility:\n` +
+        `  status=${contact.status}\n` +
+        `  referenceDate=${new Date(referenceDate).toISOString().split("T")[0]}\n` +
+        `  daysSince=${daysPassed}\n` +
+        `  requiredDelay=${required}\n` +
+        `  eligible=${eligible}`
+      );
+
+      if (!eligible) continue; // Not time yet — skip silently after logging
     }
 
     // ─── CONCURRENCY LOCK ─────────────────────────────────────────────────────
