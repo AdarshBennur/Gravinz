@@ -1,16 +1,17 @@
-/**
- * date-utils.ts
- *
- * Single source of truth for all date/time formatting across the frontend.
- * All timestamps are stored in UTC in the DB. This module converts them
- * to the user's selected timezone (from campaign_settings.timezone) for display.
- *
- * Rules:
- *  - Always 12-hour format with AM/PM
- *  - Falls back to "UTC" if no timezone is provided
- *  - Returns "—" for null/undefined/invalid dates
- *  - Never mutates DB values — display layer only
- */
+// ALL date formatting in the application MUST go through this file.
+// Direct formatting elsewhere is forbidden.
+//
+// date-utils.ts
+//
+// Single source of truth for all date/time formatting across the frontend.
+// All timestamps are stored in UTC in the DB. This module converts them
+// to the user's selected timezone (from campaign_settings.timezone) for display.
+//
+// Rules:
+//  - Always 12-hour format with AM/PM
+//  - Falls back to "UTC" if no timezone is provided
+//  - Returns "—" for null/undefined/invalid dates
+//  - Never mutates DB values — display layer only
 
 import { formatInTimeZone } from "date-fns-tz";
 import { isValid, parseISO } from "date-fns";
@@ -117,7 +118,7 @@ export function formatThreadTime(
 }
 
 /**
- * Format a date as a full human-readable string for tooltips / detail views.
+ * Format a full human-readable string for tooltips / detail views.
  * e.g. "Mon, Mar 15 09:05 AM"
  */
 export function formatFullDate(
@@ -128,4 +129,27 @@ export function formatFullDate(
     const d = toDate(dateStr);
     if (!d) return "";
     return formatInUserTimezone(d, timezone, "EEE, MMM d hh:mm a");
+}
+
+/**
+ * Convert a 24-hour "HH:MM" time string (as stored in campaign_settings.start_time)
+ * to a 12-hour AM/PM display string.
+ *
+ * @param timeStr - "HH:MM" string, e.g. "09:00" or "21:30"
+ * @returns        "09:00 AM" / "09:30 PM", or the raw string if parsing fails
+ *
+ * @example
+ * formatStartTime("09:00")  // → "09:00 AM"
+ * formatStartTime("21:30")  // → "09:30 PM"
+ * formatStartTime(undefined) // → "—"
+ */
+export function formatStartTime(timeStr: string | null | undefined): string {
+    if (!timeStr) return "—";
+    const [hourStr, minuteStr] = timeStr.split(":");
+    const hour = parseInt(hourStr ?? "", 10);
+    const minute = parseInt(minuteStr ?? "", 10);
+    if (isNaN(hour) || isNaN(minute)) return timeStr;
+    const period = hour >= 12 ? "PM" : "AM";
+    const h12 = hour % 12 === 0 ? 12 : hour % 12;
+    return `${String(h12).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${period}`;
 }

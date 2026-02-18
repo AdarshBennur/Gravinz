@@ -14,6 +14,8 @@ import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import { useTimezone } from "@/hooks/use-timezone";
+import { formatStartTime } from "@/lib/date-utils";
 
 interface CampaignSettings {
   dailyLimit: number;
@@ -312,7 +314,7 @@ export default function CampaignSettingsPage() {
             <div className="text-sm font-semibold" data-testid="text-automation-title">Automation Control</div>
             <div className="mt-3 text-sm text-muted-foreground">
               {automationStatus === "running"
-                ? `Automation is active. Sends start at ${startTime} daily.`
+                ? `Automation is active. Sends start at ${formatStartTime(startTime)} daily.`
                 : "Start automation to begin sending emails automatically."}
             </div>
             <div className="mt-4 flex gap-2">
@@ -358,7 +360,7 @@ export default function CampaignSettingsPage() {
               </div>
               <div className="flex items-center justify-between" data-testid="row-summary-start-time">
                 <div className="text-muted-foreground">Start time</div>
-                <div className="font-medium" data-testid="text-summary-start-time">{startTime}</div>
+                <div className="font-medium" data-testid="text-summary-start-time">{formatStartTime(startTime)}</div>
               </div>
               <div className="flex items-center justify-between" data-testid="row-summary-timezone">
                 <div className="text-muted-foreground">Timezone</div>
