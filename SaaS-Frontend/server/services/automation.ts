@@ -459,7 +459,7 @@ export async function processUserAutomation(userId: string) {
           if (resumeRes.ok) {
             const arrayBuffer = await resumeRes.arrayBuffer();
             attachments.push({
-              filename: "Resume.pdf",
+              filename: userProfile.resumeOriginalName || "attachment.pdf",
               content: Buffer.from(arrayBuffer),
               contentType: "application/pdf",
             });

@@ -2,6 +2,8 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { db } from "./db";
+import { sql } from "drizzle-orm";
 
 const app = express();
 const httpServer = createServer(app);
@@ -60,6 +62,18 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // ── Startup migrations (idempotent) ──────────────────────────────────────
+  try {
+    // Add resume_original_name column if it doesn't exist yet.
+    await db.execute(sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS resume_original_name TEXT`);
+    console.log("[Migration] resume_original_name column ready.");
+  } catch (e: any) {
+    // Column may already exist — that's fine.
+    if (!e?.message?.includes("already exists")) {
+      console.warn("[Migration] resume_original_name warning:", e?.message);
+    }
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {

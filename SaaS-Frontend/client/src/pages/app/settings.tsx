@@ -106,6 +106,7 @@ interface ProfileData {
     description?: string;
     promptOverride?: string;
     resumeUrl?: string;
+    resumeOriginalName?: string;
   } | null;
   experiences: Experience[];
   projects: Project[];
@@ -144,9 +145,8 @@ export default function ProfileSettingsPage() {
       setExperiences(data.experiences ?? []);
       setProjects(data.projects ?? []);
       if (p?.resumeUrl) {
-        // Extract filename from URL or show default
-        const name = p.resumeUrl.split('/').pop();
-        setFileName(name || "Uploaded Resume");
+        // Use stored original filename; fall back to "Uploaded Resume" for legacy entries
+        setFileName(p.resumeOriginalName || "Uploaded Resume");
       }
     }
   }, [data]);

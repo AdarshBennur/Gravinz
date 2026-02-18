@@ -289,6 +289,7 @@ export async function registerRoutes(
             description: profile.profileDescription || "",
             customPrompt: profile.customPrompt || "",
             resumeUrl: profile.resumeUrl || null,
+            resumeOriginalName: profile.resumeOriginalName || null,
           }
           : null,
         experiences: exps,
@@ -336,6 +337,7 @@ export async function registerRoutes(
         description: profile.profileDescription || "",
         customPrompt: profile.customPrompt || "",
         resumeUrl: profile.resumeUrl || null,
+        resumeOriginalName: profile.resumeOriginalName || null,
         experiences: updatedExperiences,
         projects: updatedProjects,
       });
@@ -393,7 +395,8 @@ export async function registerRoutes(
 
       // 4. Update Profile with URL
       await storage.upsertUserProfile(userId, {
-        resumeUrl: publicUrl
+        resumeUrl: publicUrl,
+        resumeOriginalName: file.originalname,
       });
 
       res.json({

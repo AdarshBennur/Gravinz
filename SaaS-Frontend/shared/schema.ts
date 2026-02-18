@@ -84,6 +84,7 @@ export const userProfiles = pgTable("user_profiles", {
   currentStatus: currentStatusEnum("current_status").default("working"),
   customPrompt: text("custom_prompt"),
   resumeUrl: text("resume_url"),
+  resumeOriginalName: text("resume_original_name"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
