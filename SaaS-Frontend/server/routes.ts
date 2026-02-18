@@ -409,6 +409,40 @@ export async function registerRoutes(
     }
   });
 
+  app.delete("/api/profile/resume", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const userProfile = await storage.getUserProfile(userId);
+
+      if (userProfile?.resumeUrl) {
+        // Attempt to extract the path for deletion
+        // Public URL format ends with .../resumes/USER_ID/FILENAME
+        const urlParts = userProfile.resumeUrl.split("/resumes/");
+        if (urlParts.length > 1) {
+          const filePath = urlParts[1];
+          // Delete from storage
+          const { error: deleteError } = await supabaseAdmin.storage
+            .from("resumes")
+            .remove([filePath]);
+
+          if (deleteError) {
+            console.warn("Storage delete error (non-blocking):", deleteError);
+          }
+        }
+      }
+
+      await storage.upsertUserProfile(userId, {
+        resumeUrl: null,
+        resumeOriginalName: null,
+      });
+
+      res.json({ message: "Resume removed" });
+    } catch (error: any) {
+      console.error("Resume remove error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/experiences", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
