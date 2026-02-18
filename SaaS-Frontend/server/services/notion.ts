@@ -381,37 +381,70 @@ function extractNotionProperty(data: Record<string, any>, candidates: string[]):
 export async function syncContactStatusToNotion(
   userId: string,
   contactId: string,
-  status: string
+  status: string,
+  dates: {
+    firstEmailDate?: Date | null;
+    followup1Date?: Date | null;
+    followup2Date?: Date | null;
+  } = {}
 ): Promise<void> {
   const contact = await storage.getContact(contactId, userId);
-  if (!contact || !contact.notionPageId) return;
-
-  try {
-    const notion = await getNotionClient(userId);
-
-    await notion.pages.update({
-      page_id: contact.notionPageId,
-      properties: {
-        Status: {
-          select: { name: statusToNotionLabel(status) },
-        },
-      },
-    });
-  } catch (e: any) {
-    console.error(`Failed to sync status to Notion for contact ${contactId}:`, e.message);
+  if (!contact || !contact.notionPageId) {
+    console.log(`[Notion Sync] Skipping — contact ${contactId} has no Notion page ID`);
+    return;
   }
+
+  const notion = await getNotionClient(userId);
+
+  // Build properties patch — only include fields that have values
+  const properties: Record<string, any> = {
+    Status: { select: { name: statusToNotionLabel(status) } },
+  };
+
+  if (dates.firstEmailDate) {
+    properties["First Email Date"] = {
+      date: { start: new Date(dates.firstEmailDate).toISOString().split("T")[0] },
+    };
+  }
+  if (dates.followup1Date) {
+    properties["Follow-up 1 Date"] = {
+      date: { start: new Date(dates.followup1Date).toISOString().split("T")[0] },
+    };
+  }
+  if (dates.followup2Date) {
+    properties["Follow-up 2 Date"] = {
+      date: { start: new Date(dates.followup2Date).toISOString().split("T")[0] },
+    };
+  }
+
+  console.log(`[Notion Sync] Patching page ${contact.notionPageId} — status="${statusToNotionLabel(status)}", dates:`, {
+    firstEmailDate: dates.firstEmailDate ?? null,
+    followup1Date: dates.followup1Date ?? null,
+    followup2Date: dates.followup2Date ?? null,
+  });
+
+  // Throws on failure — caller (tryNotionSync) handles and logs the error
+  await notion.pages.update({
+    page_id: contact.notionPageId,
+    properties,
+  });
+
+  console.log(`[Notion Sync] Page ${contact.notionPageId} updated successfully`);
 }
 
 function statusToNotionLabel(status: string): string {
   const map: Record<string, string> = {
     "not-sent": "Not Applied",
-    sent: "First Email Sent",
+    "sent": "First Email Sent",
     "followup-1": "Follow-Up 1",
     "followup-2": "Follow-Up 2",
-    followup: "Follow-Up",
-    replied: "Replied",
-    bounced: "Bounced",
-    paused: "Paused",
+    "followup": "Follow-Up",
+    "replied": "Replied",
+    "bounced": "Bounced",
+    "paused": "Paused",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "manual_break": "Manual Break",
   };
   return map[status] || status;
 }
