@@ -2,8 +2,6 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { db } from "./db";
-import { sql } from "drizzle-orm";
 
 const app = express();
 const httpServer = createServer(app);
@@ -63,16 +61,10 @@ app.use((req, res, next) => {
 
 (async () => {
   // ── Startup migrations (idempotent) ──────────────────────────────────────
-  try {
-    // Add resume_original_name column if it doesn't exist yet.
-    await db.execute(sql`ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS resume_original_name TEXT`);
-    console.log("[Migration] resume_original_name column ready.");
-  } catch (e: any) {
-    // Column may already exist — that's fine.
-    if (!e?.message?.includes("already exists")) {
-      console.warn("[Migration] resume_original_name warning:", e?.message);
-    }
-  }
+  // Note: Migration for resume_original_name must be run manually via Supabase SQL Editor
+  // because direct TCP connection (required for DDL) is blocked in this environment.
+  // SQL: ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS resume_original_name TEXT;
+
 
   await registerRoutes(httpServer, app);
 
