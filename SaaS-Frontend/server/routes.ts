@@ -510,29 +510,9 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/contacts/:id", requireAuth, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const contact = await storage.updateContact(req.params.id as string, userId, req.body);
-      if (!contact) return res.status(404).json({ message: "Not found" });
-      res.json(contact);
-    } catch (error: any) {
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
-  app.delete("/api/contacts/:id", requireAuth, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const deleted = await storage.deleteContact(req.params.id as string, userId);
-      if (!deleted) return res.status(404).json({ message: "Not found" });
-      res.json({ message: "Deleted" });
-    } catch (error: any) {
-      res.status(500).json({ message: "Internal server error" });
-    }
-  });
-
   // ─── Clear All Contacts (local DB only — Notion is never touched) ─────
+  // IMPORTANT: This route MUST be registered before /api/contacts/:id
+  // so Express does not match "clear" as a contact ID param.
   app.delete("/api/contacts/clear", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -554,6 +534,28 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("[contacts/clear] Error:", error);
       res.status(500).json({ message: error.message || "Internal server error" });
+    }
+  });
+
+  app.put("/api/contacts/:id", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const contact = await storage.updateContact(req.params.id as string, userId, req.body);
+      if (!contact) return res.status(404).json({ message: "Not found" });
+      res.json(contact);
+    } catch (error: any) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/contacts/:id", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const deleted = await storage.deleteContact(req.params.id as string, userId);
+      if (!deleted) return res.status(404).json({ message: "Not found" });
+      res.json({ message: "Deleted" });
+    } catch (error: any) {
+      res.status(500).json({ message: "Internal server error" });
     }
   });
 
