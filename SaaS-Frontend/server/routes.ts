@@ -581,7 +581,26 @@ export async function registerRoutes(
   app.put("/api/contacts/:id", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const contact = await storage.updateContact(req.params.id as string, userId, req.body);
+
+      // ─── STRICT: Strip all automation-managed fields ──────────────────────────
+      // These fields are ONLY written by the automation state machine.
+      // A user-facing PUT must NEVER overwrite status, date timestamps, or
+      // Notion metadata — doing so would corrupt the state machine invariants.
+      const {
+        status,
+        firstEmailDate,
+        followup1Date,
+        followup2Date,
+        lastSentAt,
+        notionPageId,
+        createdAt,
+        updatedAt,
+        id,
+        userId: _uid,
+        ...userEditableFields
+      } = req.body;
+
+      const contact = await storage.updateContact(req.params.id as string, userId, userEditableFields);
       if (!contact) return res.status(404).json({ message: "Not found" });
       res.json(contact);
     } catch (error: any) {

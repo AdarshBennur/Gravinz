@@ -119,6 +119,22 @@ async function updateContactAfterSend(
     return;
   }
 
+  // ─── DEFENSIVE PRECONDITION GUARDS ───────────────────────────────────────
+  // Enforce state machine invariants BEFORE writing to DB.
+  // A transition to followup-1 REQUIRES firstEmailDate to already be set.
+  // A transition to followup-2 REQUIRES followup1Date to already be set.
+  // If these are missing, the contact is in a corrupt state — abort immediately.
+  if (type === "followup1" && !fresh.firstEmailDate) {
+    throw new Error(
+      `[AUTOMATION] PRECONDITION FAILED: Cannot transition ${contact.email} to followup-1 — firstEmailDate is NULL on fresh DB read. Aborting to prevent corrupt state.`
+    );
+  }
+  if (type === "followup2" && !fresh.followup1Date) {
+    throw new Error(
+      `[AUTOMATION] PRECONDITION FAILED: Cannot transition ${contact.email} to followup-2 — followup1Date is NULL on fresh DB read. Aborting to prevent corrupt state.`
+    );
+  }
+
   const now = new Date();
   const nowDateStr = now.toISOString().split("T")[0];
 
