@@ -46,7 +46,7 @@ export function stopAutomationScheduler() {
   console.log("[Automation] Scheduler stopped");
 }
 
-async function runAutomationCycle() {
+export async function runAutomationCycle() {
   if (sendCycleRunning) {
     console.log("[Automation] Send cycle already running, skipping");
     return;
@@ -642,7 +642,12 @@ export async function repairContactDates(userId: string): Promise<{ repaired: nu
 
 function daysSince(dateVal: Date | string | null | undefined): number {
   if (!dateVal) return -1;
-  const last = new Date(dateVal).getTime();
+  // Append "Z" if no timezone marker — same fix as Notion sync.
+  // DB columns are timestamp without time zone: returned strings have no Z.
+  // new Date("2026-02-15T00:30:00") is treated as local IST, not UTC.
+  const raw = dateVal instanceof Date ? dateVal.toISOString() : String(dateVal);
+  const utcStr = /[Zz]|[+-]\d{2}:\d{2}$/.test(raw) ? raw : raw + "Z";
+  const last = new Date(utcStr).getTime();
   const now = Date.now();
   if (isNaN(last)) return -1;
   return Math.floor((now - last) / (1000 * 60 * 60 * 24));

@@ -18,7 +18,7 @@ import {
 import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./services/gmail";
 import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
-import { startAutomationScheduler, stopAutomationScheduler, repairContactDates, isAutomationRunning } from "./services/automation";
+import { startAutomationScheduler, stopAutomationScheduler, repairContactDates, isAutomationRunning, runAutomationCycle } from "./services/automation";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 import { campaignSettings } from "@shared/schema";
@@ -811,6 +811,14 @@ export async function registerRoutes(
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
+      });
+
+      // Kick off a cycle immediately — don't make the user wait up to 5 min for cron.
+      // Fire-and-forget; errors are caught inside runAutomationCycle.
+      setImmediate(() => {
+        runAutomationCycle().catch((err: any) =>
+          console.error("[Automation] Immediate start cycle error:", err.message)
+        );
       });
     } catch (error: any) {
       console.error("Start automation error:", error);
