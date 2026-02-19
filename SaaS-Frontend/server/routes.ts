@@ -875,6 +875,73 @@ export async function registerRoutes(
   });
 
 
+  // ─── AUTOMATION DEBUG ENDPOINT ─────────────────────────────────────────────
+  // Returns full diagnostic state: settings, Gmail, contacts, cycle result.
+  app.get("/api/automation/debug-run", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const settings = await storage.getCampaignSettings(userId);
+      const gmailIntegration = await storage.getIntegration(userId, "gmail");
+      const contacts = await storage.getContacts(userId);
+      const today = new Date().toISOString().split("T")[0];
+      const usage = await storage.getDailyUsage(userId, today);
+
+      // Run startTime check manually
+      let isAfterStart = true;
+      let startCheckDetail = "";
+      if (settings) {
+        const startTime = settings.startTime || "09:00";
+        const tz = settings.timezone || "America/New_York";
+        try {
+          const now = new Date();
+          const formatter = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
+          const parts = formatter.formatToParts(now);
+          const currentHour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+          const currentMinute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+          const [startHour, startMinute] = startTime.split(":").map(Number);
+          const currentMins = currentHour * 60 + currentMinute;
+          const startMins = startHour * 60 + startMinute;
+          isAfterStart = currentMins >= startMins;
+          startCheckDetail = `currentTime=${currentHour}:${String(currentMinute).padStart(2, "0")} (${tz}), startTime=${startTime}, currentMins=${currentMins}, startMins=${startMins}`;
+        } catch (e: any) { startCheckDetail = `ERROR: ${e.message}`; }
+      }
+
+      const diag = {
+        userId,
+        serverTime: new Date().toISOString(),
+        settings: settings ? {
+          automationStatus: settings.automationStatus,
+          startTime: settings.startTime,
+          timezone: settings.timezone,
+          dailyLimit: settings.dailyLimit,
+          followupCount: settings.followupCount,
+          followupDelays: settings.followupDelays,
+        } : null,
+        isAfterStartTime: isAfterStart,
+        startTimeCheck: startCheckDetail,
+        gmail: { connected: gmailIntegration?.connected ?? false },
+        dailyUsage: { today, sentToday: usage?.emailsSent ?? 0, limit: settings?.dailyLimit ?? 80 },
+        contacts: contacts.map(c => ({ id: c.id, email: c.email, status: c.status, firstEmailDate: c.firstEmailDate })),
+        contactCount: contacts.length,
+        contactStatusBreakdown: contacts.reduce((acc: Record<string, number>, c) => {
+          const s = c.status || "null";
+          acc[s] = (acc[s] || 0) + 1;
+          return acc;
+        }, {}),
+      };
+
+      // Now actually run the cycle
+      let cycleError: string | null = null;
+      try {
+        await runAutomationCycle();
+      } catch (e: any) { cycleError = e.message; }
+
+      res.json({ diag, cycleError, message: "Cycle triggered. Check server terminal for [AUTOMATION DEBUG] logs." });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // ─── DATA REPAIR ENDPOINT ──────────────────────────────────────────────────
   // Fixes corrupted contacts from Notion imports where status is set but dates are NULL.
   // Call this once to repair existing data inconsistencies.
