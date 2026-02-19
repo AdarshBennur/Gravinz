@@ -124,15 +124,15 @@ export const contacts = pgTable("contacts", {
   company: text("company"),
   role: text("role"),
   status: text("status").default("not-sent"), // Changed from enum to text for flexibility
-  lastSentAt: timestamp("last_sent_at"),
+  lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
   notionPageId: text("notion_page_id"),
   source: text("source").default("manual"),
   followupsSent: integer("followups_sent").default(0),
   notes: text("notes"),
   // New columns for Notion import
-  firstEmailDate: timestamp("first_email_date"),
-  followup1Date: timestamp("followup1_date"),
-  followup2Date: timestamp("followup2_date"),
+  firstEmailDate: timestamp("first_email_date", { withTimezone: true }),
+  followup1Date: timestamp("followup1_date", { withTimezone: true }),
+  followup2Date: timestamp("followup2_date", { withTimezone: true }),
   jobLink: text("job_link"),
   // Dynamic Notion data storage
   notionData: jsonb("notion_data"), // Stores complete Notion row (all columns)

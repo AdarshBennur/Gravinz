@@ -574,19 +574,33 @@ export async function syncContactStatusToNotion(
     Status: { select: { name: statusToNotionLabel(status) } },
   };
 
+  // ─── UTC-SAFE DATE FORMATTING ──────────────────────────────────────────────
+  // Columns are `timestamp without time zone`. Postgres strips the "Z" when
+  // reading back, so values arrive as "2026-02-15T00:30:00" (no Z).
+  // JS Date() treats a string WITHOUT a Z as *local* time (IST = UTC+5:30),
+  // which shifts the UTC date backward by ~5.5 hours, rolling Feb-15 → Feb-14.
+  // Fix: append "Z" if the string has no timezone marker before parsing.
+  const asUTCDate = (d: Date | string | null | undefined): string => {
+    if (!d) return "";
+    const raw = d instanceof Date ? d.toISOString() : String(d);
+    // If it already has a timezone marker (Z or +xx:xx), use as-is; otherwise force UTC.
+    const utcStr = /[Zz]|[+-]\d{2}:\d{2}$/.test(raw) ? raw : raw + "Z";
+    return new Date(utcStr).toISOString().split("T")[0];
+  };
+
   if (dates.firstEmailDate) {
     properties["First Email Date"] = {
-      date: { start: new Date(dates.firstEmailDate).toISOString().split("T")[0] },
+      date: { start: asUTCDate(dates.firstEmailDate) },
     };
   }
   if (dates.followup1Date) {
     properties["Follow-up 1 Date"] = {
-      date: { start: new Date(dates.followup1Date).toISOString().split("T")[0] },
+      date: { start: asUTCDate(dates.followup1Date) },
     };
   }
   if (dates.followup2Date) {
     properties["Follow-up 2 Date"] = {
-      date: { start: new Date(dates.followup2Date).toISOString().split("T")[0] },
+      date: { start: asUTCDate(dates.followup2Date) },
     };
   }
 
