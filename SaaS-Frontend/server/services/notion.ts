@@ -574,18 +574,22 @@ export async function syncContactStatusToNotion(
     Status: { select: { name: statusToNotionLabel(status) } },
   };
 
-  // ─── UTC-SAFE DATE FORMATTING ──────────────────────────────────────────────
-  // Columns are `timestamp without time zone`. Postgres strips the "Z" when
-  // reading back, so values arrive as "2026-02-15T00:30:00" (no Z).
-  // JS Date() treats a string WITHOUT a Z as *local* time (IST = UTC+5:30),
-  // which shifts the UTC date backward by ~5.5 hours, rolling Feb-15 → Feb-14.
-  // Fix: append "Z" if the string has no timezone marker before parsing.
+  // ─── UTC-SAFE DATE FORMATTING (NOTION DISPLAY ONLY) ───────────────────────
+  // IMPORTANT: asUTCDate() returns a date-only string ("YYYY-MM-DD").
+  // This is used EXCLUSIVELY for the Notion API payload, which requires date-only.
+  // This value MUST NEVER be written back to the database.
+  // DB writes always use full ISO-8601 UTC timestamps (new Date().toISOString()).
+  //
+  // Why the "Z" append: timestamp without time zone columns return strings without
+  // a timezone marker (e.g. "2026-02-15T00:30:00"). JS Date() treats a Z-less
+  // string as local time (IST = UTC+5:30), shifting the date backward by 5.5h.
+  // Appending "Z" forces UTC interpretation, preventing Feb-15 → Feb-14 rollback.
   const asUTCDate = (d: Date | string | null | undefined): string => {
     if (!d) return "";
     const raw = d instanceof Date ? d.toISOString() : String(d);
     // If it already has a timezone marker (Z or +xx:xx), use as-is; otherwise force UTC.
     const utcStr = /[Zz]|[+-]\d{2}:\d{2}$/.test(raw) ? raw : raw + "Z";
-    return new Date(utcStr).toISOString().split("T")[0];
+    return new Date(utcStr).toISOString().split("T")[0]; // "YYYY-MM-DD" — Notion display ONLY
   };
 
   if (dates.firstEmailDate) {

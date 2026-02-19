@@ -135,8 +135,10 @@ async function updateContactAfterSend(
     );
   }
 
-  const now = new Date();
-  const nowDateStr = now.toISOString().split("T")[0];
+  // ─── TIMESTAMP GENERATION ─────────────────────────────────────────────────
+  // ALWAYS use full ISO-8601 UTC string. NEVER a Date object, NEVER date-only.
+  // Columns are timestamptz — they require the full precision moment.
+  const now = new Date().toISOString(); // e.g. "2026-02-19T11:24:00.000Z"
 
   // ─── STRICT DATE ASSIGNMENT ───────────────────────────────────────────────
   // Each transition sets EXACTLY ONE date field.
@@ -154,7 +156,7 @@ async function updateContactAfterSend(
       console.log(`[AUTOMATION] firstEmailDate already set (${fresh.firstEmailDate}) — preserving original`);
     } else {
       dateUpdates.firstEmailDate = now;
-      console.log(`[AUTOMATION] Transition:\n  not-sent -> sent\n  Setting firstEmailDate=${nowDateStr}`);
+      console.log(`[AUTOMATION] Transition:\n  not-sent -> sent\n  Setting firstEmailDate=${now}`);
     }
     // Explicit safety: do NOT include followup1Date or followup2Date in this update
 
@@ -164,7 +166,7 @@ async function updateContactAfterSend(
       console.log(`[AUTOMATION] followup1Date already set (${fresh.followup1Date}) — preserving original`);
     } else {
       dateUpdates.followup1Date = now;
-      console.log(`[AUTOMATION] Transition:\n  sent -> followup-1\n  Setting followup1Date=${nowDateStr}`);
+      console.log(`[AUTOMATION] Transition:\n  sent -> followup-1\n  Setting followup1Date=${now}`);
     }
     // Explicit safety: do NOT include firstEmailDate or followup2Date in this update
 
@@ -174,9 +176,21 @@ async function updateContactAfterSend(
       console.log(`[AUTOMATION] followup2Date already set (${fresh.followup2Date}) — preserving original`);
     } else {
       dateUpdates.followup2Date = now;
-      console.log(`[AUTOMATION] Transition:\n  followup-1 -> followup-2\n  Setting followup2Date=${nowDateStr}`);
+      console.log(`[AUTOMATION] Transition:\n  followup-1 -> followup-2\n  Setting followup2Date=${now}`);
     }
     // Explicit safety: do NOT include firstEmailDate or followup1Date in this update
+  }
+
+  // ─── DEFENSIVE GUARD: No date-only strings in DB ──────────────────────────
+  // Ensures no value shorter than a full ISO timestamp (>10 chars) ever reaches
+  // the DB. A date-only string ("2026-02-19") would silently strip the time.
+  for (const [key, value] of Object.entries(dateUpdates)) {
+    if (typeof value === "string" && value.length <= 10) {
+      throw new Error(
+        `[AUTOMATION] GUARD: Attempted to store date-only value "${value}" ` +
+        `for field "${key}". Only full ISO-8601 timestamps are allowed in timestamp columns.`
+      );
+    }
   }
 
   // DB UPDATE — status + exactly one date field in a single atomic call
