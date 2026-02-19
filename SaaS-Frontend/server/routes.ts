@@ -18,7 +18,7 @@ import {
 import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./services/gmail";
 import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
-import { startAutomationScheduler, stopAutomationScheduler, repairContactDates } from "./services/automation";
+import { startAutomationScheduler, stopAutomationScheduler, repairContactDates, isAutomationRunning } from "./services/automation";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 import { campaignSettings } from "@shared/schema";
@@ -544,6 +544,37 @@ export async function registerRoutes(
       res.status(201).json(contact);
     } catch (error: any) {
       res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  // ─── Clear All Contacts (local DB only — Notion is never touched) ─────
+  // IMPORTANT: This route MUST be registered before /api/contacts/:id
+  // so Express does not match "clear" as a contact ID param.
+  app.delete("/api/contacts/clear", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+
+      // Safety: check the DB automationStatus for THIS user.
+      // The DB is the single source of truth — if the user paused automation
+      // in the UI, the DB reflects that immediately.
+      // We do NOT use the in-memory sendCycleRunning flag because it is
+      // shared across all users and can be briefly true during a 5-min cron tick.
+      const settings = await storage.getCampaignSettings(userId);
+      if (settings?.automationStatus === "running") {
+        return res.status(409).json({
+          message:
+            "Automation is currently running. Please pause it before clearing contacts.",
+        });
+      }
+
+      // Hard-delete all contacts for this user from local DB only.
+      // This does NOT call Notion, archive Notion pages, or modify Notion in any way.
+      const deleted = await storage.clearAllContacts(userId);
+
+      res.json({ deleted, message: "All contacts cleared from application." });
+    } catch (error: any) {
+      console.error("[contacts/clear] Error:", error);
+      res.status(500).json({ message: error.message || "Internal server error" });
     }
   });
 
