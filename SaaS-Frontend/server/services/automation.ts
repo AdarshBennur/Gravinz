@@ -247,6 +247,9 @@ export async function processUserAutomation(userId: string) {
   }
 
   const remainingQuota = dailyLimit - sentToday;
+  // How many days to wait after final follow-up before marking rejected.
+  // null = never auto-reject (manual only). 0 = immediate (legacy behavior).
+  const autoRejectAfterDays: number | null = settings.autoRejectAfterDays ?? 7;
   const contacts = await storage.getContacts(userId);
 
   // ─── CAMPAIGN SETTINGS: STRICT LOADING WITH FALLBACK WARNINGS ───────────
@@ -399,13 +402,24 @@ export async function processUserAutomation(userId: string) {
           continue;
         }
         if (maxFollowups < 1) {
-          console.log(`[AUTOMATION DEBUG] ${contact.email}: maxFollowups=${maxFollowups}, no followups configured. Moving to rejected.`);
-          await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
-          await tryNotionSync(userId, contact.id, "rejected", {
-            firstEmailDate: contact.firstEmailDate,
-            followup1Date: null,
-            followup2Date: null,
-          });
+          // No follow-ups configured → this contact is at the end of the sequence.
+          // Apply autoRejectAfterDays from firstEmailDate before marking rejected.
+          if (autoRejectAfterDays === null) {
+            console.log(`[AUTOMATION] ${contact.email}: maxFollowups<1, autoRejectAfterDays=null → never auto-reject. Skipping.`);
+            continue;
+          }
+          const daysPassed = daysSince(contact.firstEmailDate);
+          if (autoRejectAfterDays === 0 || daysPassed >= autoRejectAfterDays) {
+            console.log(`[AUTOMATION] ${contact.email}: maxFollowups<1, ${daysPassed}d >= ${autoRejectAfterDays}d → rejected.`);
+            await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
+            await tryNotionSync(userId, contact.id, "rejected", {
+              firstEmailDate: contact.firstEmailDate,
+              followup1Date: null,
+              followup2Date: null,
+            });
+          } else {
+            console.log(`[AUTOMATION] ${contact.email}: maxFollowups<1, waiting for auto-rejection (${daysPassed}/${autoRejectAfterDays} days).`);
+          }
           continue;
         }
         targetAction = {
@@ -430,13 +444,23 @@ export async function processUserAutomation(userId: string) {
           continue;
         }
         if (maxFollowups < 2) {
-          console.log(`[AUTOMATION DEBUG] ${contact.email}: maxFollowups=${maxFollowups}, no followup-2 configured. Moving to rejected.`);
-          await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
-          await tryNotionSync(userId, contact.id, "rejected", {
-            firstEmailDate: contact.firstEmailDate,
-            followup1Date: contact.followup1Date,
-            followup2Date: null,
-          });
+          // Only followup-1 configured → apply delay from followup1Date before rejecting.
+          if (autoRejectAfterDays === null) {
+            console.log(`[AUTOMATION] ${contact.email}: maxFollowups<2, autoRejectAfterDays=null → never auto-reject. Skipping.`);
+            continue;
+          }
+          const daysPassed = daysSince(contact.followup1Date);
+          if (autoRejectAfterDays === 0 || daysPassed >= autoRejectAfterDays) {
+            console.log(`[AUTOMATION] ${contact.email}: maxFollowups<2, ${daysPassed}d >= ${autoRejectAfterDays}d → rejected.`);
+            await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
+            await tryNotionSync(userId, contact.id, "rejected", {
+              firstEmailDate: contact.firstEmailDate,
+              followup1Date: contact.followup1Date,
+              followup2Date: null,
+            });
+          } else {
+            console.log(`[AUTOMATION] ${contact.email}: maxFollowups<2, waiting for auto-rejection (${daysPassed}/${autoRejectAfterDays} days).`);
+          }
           continue;
         }
         targetAction = {
@@ -450,15 +474,23 @@ export async function processUserAutomation(userId: string) {
         break;
 
       case "followup-2":
-        // STATE 4: No more follow-ups. If no reply, mark rejected.
-        if (contact.status === "followup-2") {
-          console.log(`[AUTOMATION DEBUG] ${contact.email}: status="followup-2", no more followups. Moving to rejected.`);
-          await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
-          await tryNotionSync(userId, contact.id, "rejected", {
-            firstEmailDate: contact.firstEmailDate ?? null,
-            followup1Date: contact.followup1Date ?? null,
-            followup2Date: contact.followup2Date ?? null,
-          });
+        // STATE 4: Final follow-up sent. Wait autoRejectAfterDays before marking rejected.
+        if (autoRejectAfterDays === null) {
+          // null = never auto-reject
+          console.log(`[AUTOMATION] ${contact.email}: status="followup-2", autoRejectAfterDays=null → never auto-reject. Skipping.`);
+        } else {
+          const daysPassed = daysSince(contact.followup2Date);
+          if (autoRejectAfterDays === 0 || daysPassed >= autoRejectAfterDays) {
+            console.log(`[AUTOMATION] ${contact.email}: ${daysPassed}d since followup-2 >= ${autoRejectAfterDays}d → rejected.`);
+            await storage.updateContact(contact.id, userId, { status: "rejected" } as any);
+            await tryNotionSync(userId, contact.id, "rejected", {
+              firstEmailDate: contact.firstEmailDate ?? null,
+              followup1Date: contact.followup1Date ?? null,
+              followup2Date: contact.followup2Date ?? null,
+            });
+          } else {
+            console.log(`[AUTOMATION] ${contact.email}: Waiting for auto-rejection. ${daysPassed}/${autoRejectAfterDays} days elapsed since followup-2.`);
+          }
         }
         continue;
 

@@ -745,6 +745,7 @@ export async function registerRoutes(
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
         delays: settings.followupDelays,
+        autoRejectAfterDays: settings.autoRejectAfterDays ?? 7,
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
@@ -760,11 +761,12 @@ export async function registerRoutes(
   app.put("/api/campaign-settings", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const { dailyLimit, followups, delays, priority, balanced, startTime, timezone } = req.body;
+      const { dailyLimit, followups, delays, priority, balanced, startTime, timezone, autoRejectAfterDays } = req.body;
       const settings = await storage.upsertCampaignSettings(userId, {
         dailyLimit: dailyLimit ?? undefined,
         followupCount: followups ?? undefined,
         followupDelays: delays ?? undefined,
+        autoRejectAfterDays: autoRejectAfterDays !== undefined ? autoRejectAfterDays : undefined,
         priorityMode: priority ?? undefined,
         balancedRatio: balanced ?? undefined,
         startTime: startTime ?? undefined,
@@ -774,6 +776,7 @@ export async function registerRoutes(
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
         delays: settings.followupDelays,
+        autoRejectAfterDays: settings.autoRejectAfterDays ?? 7,
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
