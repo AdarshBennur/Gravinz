@@ -46,7 +46,7 @@ export function stopAutomationScheduler() {
   console.log("[Automation] Scheduler stopped");
 }
 
-async function runAutomationCycle() {
+export async function runAutomationCycle() {
   if (sendCycleRunning) {
     console.log("[Automation] Send cycle already running, skipping");
     return;
@@ -119,8 +119,26 @@ async function updateContactAfterSend(
     return;
   }
 
-  const now = new Date();
-  const nowDateStr = now.toISOString().split("T")[0];
+  // ─── DEFENSIVE PRECONDITION GUARDS ───────────────────────────────────────
+  // Enforce state machine invariants BEFORE writing to DB.
+  // A transition to followup-1 REQUIRES firstEmailDate to already be set.
+  // A transition to followup-2 REQUIRES followup1Date to already be set.
+  // If these are missing, the contact is in a corrupt state — abort immediately.
+  if (type === "followup1" && !fresh.firstEmailDate) {
+    throw new Error(
+      `[AUTOMATION] PRECONDITION FAILED: Cannot transition ${contact.email} to followup-1 — firstEmailDate is NULL on fresh DB read. Aborting to prevent corrupt state.`
+    );
+  }
+  if (type === "followup2" && !fresh.followup1Date) {
+    throw new Error(
+      `[AUTOMATION] PRECONDITION FAILED: Cannot transition ${contact.email} to followup-2 — followup1Date is NULL on fresh DB read. Aborting to prevent corrupt state.`
+    );
+  }
+
+  // ─── TIMESTAMP GENERATION ─────────────────────────────────────────────────
+  // ALWAYS use full ISO-8601 UTC string. NEVER a Date object, NEVER date-only.
+  // Columns are timestamptz — they require the full precision moment.
+  const now = new Date().toISOString(); // e.g. "2026-02-19T11:24:00.000Z"
 
   // ─── STRICT DATE ASSIGNMENT ───────────────────────────────────────────────
   // Each transition sets EXACTLY ONE date field.
@@ -138,7 +156,7 @@ async function updateContactAfterSend(
       console.log(`[AUTOMATION] firstEmailDate already set (${fresh.firstEmailDate}) — preserving original`);
     } else {
       dateUpdates.firstEmailDate = now;
-      console.log(`[AUTOMATION] Transition:\n  not-sent -> sent\n  Setting firstEmailDate=${nowDateStr}`);
+      console.log(`[AUTOMATION] Transition:\n  not-sent -> sent\n  Setting firstEmailDate=${now}`);
     }
     // Explicit safety: do NOT include followup1Date or followup2Date in this update
 
@@ -148,7 +166,7 @@ async function updateContactAfterSend(
       console.log(`[AUTOMATION] followup1Date already set (${fresh.followup1Date}) — preserving original`);
     } else {
       dateUpdates.followup1Date = now;
-      console.log(`[AUTOMATION] Transition:\n  sent -> followup-1\n  Setting followup1Date=${nowDateStr}`);
+      console.log(`[AUTOMATION] Transition:\n  sent -> followup-1\n  Setting followup1Date=${now}`);
     }
     // Explicit safety: do NOT include firstEmailDate or followup2Date in this update
 
@@ -158,9 +176,21 @@ async function updateContactAfterSend(
       console.log(`[AUTOMATION] followup2Date already set (${fresh.followup2Date}) — preserving original`);
     } else {
       dateUpdates.followup2Date = now;
-      console.log(`[AUTOMATION] Transition:\n  followup-1 -> followup-2\n  Setting followup2Date=${nowDateStr}`);
+      console.log(`[AUTOMATION] Transition:\n  followup-1 -> followup-2\n  Setting followup2Date=${now}`);
     }
     // Explicit safety: do NOT include firstEmailDate or followup1Date in this update
+  }
+
+  // ─── DEFENSIVE GUARD: No date-only strings in DB ──────────────────────────
+  // Ensures no value shorter than a full ISO timestamp (>10 chars) ever reaches
+  // the DB. A date-only string ("2026-02-19") would silently strip the time.
+  for (const [key, value] of Object.entries(dateUpdates)) {
+    if (typeof value === "string" && value.length <= 10) {
+      throw new Error(
+        `[AUTOMATION] GUARD: Attempted to store date-only value "${value}" ` +
+        `for field "${key}". Only full ISO-8601 timestamps are allowed in timestamp columns.`
+      );
+    }
   }
 
   // DB UPDATE — status + exactly one date field in a single atomic call
@@ -612,7 +642,12 @@ export async function repairContactDates(userId: string): Promise<{ repaired: nu
 
 function daysSince(dateVal: Date | string | null | undefined): number {
   if (!dateVal) return -1;
-  const last = new Date(dateVal).getTime();
+  // Append "Z" if no timezone marker — same fix as Notion sync.
+  // DB columns are timestamp without time zone: returned strings have no Z.
+  // new Date("2026-02-15T00:30:00") is treated as local IST, not UTC.
+  const raw = dateVal instanceof Date ? dateVal.toISOString() : String(dateVal);
+  const utcStr = /[Zz]|[+-]\d{2}:\d{2}$/.test(raw) ? raw : raw + "Z";
+  const last = new Date(utcStr).getTime();
   const now = Date.now();
   if (isNaN(last)) return -1;
   return Math.floor((now - last) / (1000 * 60 * 60 * 24));
