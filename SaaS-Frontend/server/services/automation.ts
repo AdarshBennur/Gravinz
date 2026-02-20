@@ -25,13 +25,13 @@ export function startAutomationScheduler() {
     await runAutomationCycle();
   });
 
-  // Check replies every 10 minutes
-  replyCheckTask = cron.schedule("*/10 * * * *", async () => {
+  // Check replies every 2 minutes
+  replyCheckTask = cron.schedule("*/2 * * * *", async () => {
     console.log("[Automation] Checking for replies...");
     await runReplyCheck();
   });
 
-  console.log("[Automation] Scheduler started - send cycle every 5 min, reply check every 10 min");
+  console.log("[Automation] Scheduler started - send cycle every 5 min, reply check every 2 min");
 }
 
 export function stopAutomationScheduler() {
