@@ -574,44 +574,41 @@ export async function syncContactStatusToNotion(
     Status: { select: { name: statusToNotionLabel(status) } },
   };
 
-  // ─── UTC-SAFE DATE FORMATTING (NOTION DISPLAY ONLY) ───────────────────────
-  // IMPORTANT: asUTCDate() returns a date-only string ("YYYY-MM-DD").
-  // This is used EXCLUSIVELY for the Notion API payload, which requires date-only.
-  // This value MUST NEVER be written back to the database.
-  // DB writes always use full ISO-8601 UTC timestamps (new Date().toISOString()).
+  // ─── UTC-SAFE TIMESTAMP FORMATTING (NOTION DISPLAY) ──────────────────────
+  // Sends full ISO-8601 UTC timestamp (not date-only) so Notion shows date + time.
+  // Note: user must enable "Include time" in Notion column settings for time to display.
   //
   // Why the "Z" append: timestamp without time zone columns return strings without
   // a timezone marker (e.g. "2026-02-15T00:30:00"). JS Date() treats a Z-less
   // string as local time (IST = UTC+5:30), shifting the date backward by 5.5h.
   // Appending "Z" forces UTC interpretation, preventing Feb-15 → Feb-14 rollback.
-  const asUTCDate = (d: Date | string | null | undefined): string => {
+  const asUTCTimestamp = (d: Date | string | null | undefined): string => {
     if (!d) return "";
     const raw = d instanceof Date ? d.toISOString() : String(d);
     // If it already has a timezone marker (Z or +xx:xx), use as-is; otherwise force UTC.
     const utcStr = /[Zz]|[+-]\d{2}:\d{2}$/.test(raw) ? raw : raw + "Z";
-    return new Date(utcStr).toISOString().split("T")[0]; // "YYYY-MM-DD" — Notion display ONLY
+    return new Date(utcStr).toISOString(); // Full ISO-8601 UTC — "2026-02-20T08:17:25.000Z"
   };
 
   if (dates.firstEmailDate) {
     properties["First Email Date"] = {
-      date: { start: asUTCDate(dates.firstEmailDate) },
+      date: { start: asUTCTimestamp(dates.firstEmailDate) },
     };
   }
   if (dates.followup1Date) {
     properties["Follow-up 1 Date"] = {
-      date: { start: asUTCDate(dates.followup1Date) },
+      date: { start: asUTCTimestamp(dates.followup1Date) },
     };
   }
   if (dates.followup2Date) {
     properties["Follow-up 2 Date"] = {
-      date: { start: asUTCDate(dates.followup2Date) },
+      date: { start: asUTCTimestamp(dates.followup2Date) },
     };
   }
 
-  console.log(`[Notion Sync] Patching page ${contact.notionPageId} — status="${statusToNotionLabel(status)}", dates:`, {
-    firstEmailDate: dates.firstEmailDate ?? null,
-    followup1Date: dates.followup1Date ?? null,
-    followup2Date: dates.followup2Date ?? null,
+  console.log(`[Notion Sync] Patching page ${contact.notionPageId}`, {
+    status: statusToNotionLabel(status),
+    properties: JSON.stringify(properties),
   });
 
   // Throws on failure — caller (tryNotionSync) handles and logs the error
