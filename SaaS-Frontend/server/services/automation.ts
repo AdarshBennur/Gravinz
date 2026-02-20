@@ -455,9 +455,15 @@ export async function processUserAutomation(userId: string) {
     const sendType = targetAction.isFollowup ? `Follow-up ${targetAction.number}` : "FIRST email";
     console.log(`[AUTOMATION] Sending ${sendType} to ${contact.email}`);
 
+    // ── LAYER 1: SEND ─────────────────────────────────────────────────────────
+    // Generate + send. If this throws, we rollback the lock and skip commit.
+    // Separation ensures that any post-send failure never silently skips the delay.
+    let sendResult: { emailContent: { subject: string; body: string }; result: { messageId: string; threadId?: string } } | null = null;
+
     try {
       // 1. Generate email content
       const userProfile = await storage.getUserProfile(userId);
+      console.log(`[AUTOMATION][A] Generating ${sendType} for ${contact.email}`);
       const emailContent = await generateEmail({
         userId,
         contactId: contact.id,
@@ -468,6 +474,7 @@ export async function processUserAutomation(userId: string) {
         followupNumber: targetAction.number,
         resumeUrl: userProfile?.resumeUrl || undefined,
       });
+      console.log(`[AUTOMATION][B] Email generated — subject: "${emailContent.subject}"`);
 
       // 2. Threading — attach to previous thread for follow-ups
       let previousThreadId: string | undefined;
@@ -500,6 +507,7 @@ export async function processUserAutomation(userId: string) {
       }
 
       // 4. Send via Gmail — MUST succeed before any state transition
+      console.log(`[AUTOMATION][C] Sending via Gmail to ${contact.email}`);
       const result = await sendEmail(
         userId,
         contact.email,
@@ -509,52 +517,76 @@ export async function processUserAutomation(userId: string) {
         previousMessageId,
         attachments
       );
-      console.log(`[AUTOMATION] Gmail send success for ${contact.email} (messageId: ${result.messageId})`);
+      console.log(`[AUTOMATION][D] Gmail confirmed — messageId: ${result.messageId} for ${contact.email}`);
 
-      // ── COMMIT SUCCESS ────────────────────────────────────────────────────
-      // ONLY after confirmed Gmail success do we transition state.
-      await updateContactAfterSend(contact, targetAction.type, userId);
+      sendResult = { emailContent, result };
 
-      // Log the email send record
-      await storage.createEmailSend(userId, contact.id, {
-        subject: emailContent.subject,
-        body: emailContent.body,
-        status: "sent",
-        followupNumber: targetAction.number,
-        sentAt: new Date(),
-        gmailMessageId: result.messageId,
-        gmailThreadId: result.threadId,
-      });
+    } catch (sendError: any) {
+      // Send failed (AI generation or Gmail error). Roll back the lock so the
+      // contact is retried next cycle. Do NOT create inbox records.
+      console.error(`[AUTOMATION] Send attempt failed for ${contact.email}: ${sendError.message}`);
+      try {
+        await storage.updateContact(contact.id, userId, { status: contact.status } as any);
+        console.error(`[AUTOMATION] Lock rolled back — restored "${contact.status}" for ${contact.email}`);
+      } catch (rollbackErr: any) {
+        console.error(`[AUTOMATION] CRITICAL: Lock rollback failed for ${contact.email}:`, rollbackErr.message);
+      }
+    }
 
-      await storage.createActivityLog(userId, {
-        contactName: contact.name,
-        action: targetAction.isFollowup ? `Follow-up ${targetAction.number} sent` : "First email sent",
-        status: "success",
-      });
+    // ── LAYER 2: COMMIT (only if send succeeded) ──────────────────────────────
+    // Each step is independently fault-tolerant. A DB failure must not block
+    // the inbox record, and vice versa. Notion failure must never block either.
+    if (sendResult) {
+      const { emailContent, result } = sendResult;
+
+      // 2a. Update contact status + timestamp
+      try {
+        console.log(`[AUTOMATION][E] Updating DB — status + timestamp for ${contact.email}`);
+        await updateContactAfterSend(contact, targetAction.type, userId);
+        console.log(`[AUTOMATION][F] DB update complete for ${contact.email}`);
+      } catch (dbErr: any) {
+        console.error(`[AUTOMATION] DB update failed for ${contact.email}: ${dbErr.message}`);
+        // updateContactAfterSend already calls tryNotionSync internally.
+        // If it throws, Notion was not reached — log and continue.
+      }
+
+      // 2b. Create inbox email record
+      try {
+        console.log(`[AUTOMATION][I] Creating inbox record for ${contact.email}`);
+        await storage.createEmailSend(userId, contact.id, {
+          subject: emailContent.subject,
+          body: emailContent.body,
+          status: "sent",
+          followupNumber: targetAction.number,
+          sentAt: new Date(),
+          gmailMessageId: result.messageId,
+          gmailThreadId: result.threadId,
+        });
+        console.log(`[AUTOMATION][J] Inbox record created for ${contact.email}`);
+      } catch (inboxErr: any) {
+        console.error(`[AUTOMATION] Inbox record failed for ${contact.email}: ${inboxErr.message}`);
+      }
+
+      // 2c. Activity log (best-effort, non-critical)
+      try {
+        await storage.createActivityLog(userId, {
+          contactName: contact.name,
+          action: targetAction.isFollowup ? `Follow-up ${targetAction.number} sent` : "First email sent",
+          status: "success",
+        });
+      } catch { /* non-critical */ }
 
       processedCount++;
-      console.log(`[AUTOMATION] Successfully processed ${sendType} for ${contact.email}. Total this cycle: ${processedCount}`);
-
-      // Strict 60s delay between sends (anti-spam)
-      await new Promise((resolve) => setTimeout(resolve, 60000));
-
-    } catch (error: any) {
-      // ── ROLLBACK / FAILURE ────────────────────────────────────────────────
-      console.error(`[ERROR] Failed to send ${sendType} for ${contact.email}`);
-      console.error(`[ERROR] DB before: { status: "${contact.status}", firstEmailDate: ${contact.firstEmailDate}, followup1Date: ${contact.followup1Date}, followup2Date: ${contact.followup2Date} }`);
-      console.error(`[ERROR] Error: ${error.message}`);
-      console.error(error);
-
-      await storage.updateContact(contact.id, userId, { status: "failed" } as any);
-
-      await storage.createEmailSend(userId, contact.id, {
-        status: "failed",
-        errorMessage: error.message,
-        followupNumber: targetAction.number,
-        subject: "Failed Generation",
-        body: "Failed",
-      });
+      console.log(`[AUTOMATION] Processed ${sendType} for ${contact.email}. Total this cycle: ${processedCount}`);
     }
+
+    // ── LAYER 3: DELAY (ALWAYS runs — outside every try block) ────────────────
+    // Guaranteed 60s gap between contacts regardless of send/commit outcome.
+    // This prevents rate-limit hammering even when every send fails.
+    console.log(`[AUTOMATION][K] Starting 60s anti-spam delay after ${contact.email}`);
+    await new Promise((resolve) => setTimeout(resolve, 60000));
+    console.log(`[AUTOMATION][L] Delay complete — moving to next contact`);
+
   }
 
   if (processedCount > 0) {
