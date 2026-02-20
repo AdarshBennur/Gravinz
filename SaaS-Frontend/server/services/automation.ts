@@ -230,7 +230,13 @@ export async function processUserAutomation(userId: string) {
     return;
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  // ─── TIMEZONE-AWARE DAILY QUOTA DATE ─────────────────────────────────────
+  // Use the user's configured timezone so the daily counter resets at midnight
+  // in their local time — not at UTC midnight (which is 6:30 AM IST for +05:30).
+  // en-CA locale produces "YYYY-MM-DD" format.
+  const tz = settings.timezone || "UTC";
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+
   const usage = await storage.getDailyUsage(userId, today);
   const sentToday = usage?.emailsSent ?? 0;
   const dailyLimit = settings.dailyLimit ?? 80;
@@ -243,16 +249,21 @@ export async function processUserAutomation(userId: string) {
   const remainingQuota = dailyLimit - sentToday;
   const contacts = await storage.getContacts(userId);
 
-  let processedCount = 0;
-  const maxFollowups = settings.followupCount ?? 2;
+  // ─── CAMPAIGN SETTINGS: STRICT LOADING WITH FALLBACK WARNINGS ───────────
+  // Log the raw DB values BEFORE any fallback so we can see exactly what
+  // Supabase returned. Silent defaults are the #1 cause of "random" behavior.
+  const maxFollowups = settings.followupCount ?? (() => {
+    console.warn(`[AUTOMATION] followupCount not set in DB for user ${userId} — defaulting to 2. Set it in Campaign Settings.`);
+    return 2;
+  })();
 
   // ─── SAFE JSONB PARSING ──────────────────────────────────────────────────
   // followupDelays is stored as JSONB. Drizzle may return it as:
   //   - number[] (correct)
   //   - string (if serialized incorrectly, e.g. "[2,4]")
   //   - null/undefined
-  // We MUST defensively parse it.
-  let delays: number[] = [2, 4]; // fallback default
+  // We MUST defensively parse it — but WARN loudly when a fallback fires.
+  let delays: number[] = [];
   const rawDelays = settings.followupDelays;
   if (Array.isArray(rawDelays)) {
     delays = rawDelays;
@@ -261,19 +272,39 @@ export async function processUserAutomation(userId: string) {
       const parsed = JSON.parse(rawDelays);
       if (Array.isArray(parsed)) {
         delays = parsed;
+        console.warn(`[AUTOMATION] followupDelays was a JSON string in DB: "${rawDelays}" — parsed to ${JSON.stringify(delays)}. Check JSONB column type.`);
+      } else {
+        console.error(`[AUTOMATION] followupDelays parsed but not an array: ${JSON.stringify(parsed)}. Using fallback [2,4].`);
+        delays = [2, 4];
       }
     } catch {
-      console.error(`[AUTOMATION DEBUG] Failed to parse followupDelays string: "${rawDelays}". Using default [2, 4].`);
+      console.error(`[AUTOMATION] followupDelays failed to parse: "${rawDelays}". Using fallback [2,4].`);
+      delays = [2, 4];
     }
   } else if (rawDelays != null) {
-    console.error(`[AUTOMATION DEBUG] Unexpected followupDelays type: ${typeof rawDelays}. Using default [2, 4].`);
+    console.error(`[AUTOMATION] Unexpected followupDelays type: ${typeof rawDelays} value: ${rawDelays}. Using fallback [2,4].`);
+    delays = [2, 4];
+  } else {
+    // null/undefined — no delays configured at all
+    console.warn(`[AUTOMATION] followupDelays is null/undefined for user ${userId}. Using fallback [2,4].`);
+    delays = [2, 4];
   }
 
-  console.log(`[AUTOMATION DEBUG] Campaign settings for user ${userId}:`);
-  console.log(`  maxFollowups=${maxFollowups}`);
-  console.log(`  followupDelays=${JSON.stringify(delays)}`);
-  console.log(`  dailyLimit=${dailyLimit}, sentToday=${sentToday}, remainingQuota=${remainingQuota}`);
-  console.log(`  Total contacts=${contacts.length}`);
+  let processedCount = 0;
+
+  console.log(`[AUTOMATION] Campaign settings resolved for user ${userId}:`, {
+    rawFollowupCount: settings.followupCount,        // exact DB value
+    rawFollowupDelays: settings.followupDelays,      // exact DB value
+    rawDelaysType: typeof settings.followupDelays,   // helps diagnose JSONB issues
+    resolvedMaxFollowups: maxFollowups,              // what automation will use
+    resolvedDelays: delays,                          // what automation will use
+    timezone: tz,
+    today: today,                                    // date in user's own timezone
+    dailyLimit,
+    sentToday,
+    remainingQuota: dailyLimit - sentToday,
+    totalContacts: contacts.length,
+  });
 
   // ─── SORT CONTACTS: FOLLOWUP-ELIGIBLE FIRST ──────────────────────────────
   // Critical: if not-sent contacts appear first, they consume the entire cycle
