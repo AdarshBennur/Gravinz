@@ -182,10 +182,11 @@ async function updateContactAfterSend(
   }
 
   // ─── DEFENSIVE GUARD: No date-only strings in DB ──────────────────────────
-  // Ensures no value shorter than a full ISO timestamp (>10 chars) ever reaches
-  // the DB. A date-only string ("2026-02-19") would silently strip the time.
+  // Only validate actual date fields (keys ending in "Date").
+  // Do NOT check "status" or "lastSentAt" — status values like "followup-2"
+  // are exactly 10 chars and would trip the length check incorrectly.
   for (const [key, value] of Object.entries(dateUpdates)) {
-    if (typeof value === "string" && value.length <= 10) {
+    if (key.endsWith("Date") && typeof value === "string" && value.length <= 10) {
       throw new Error(
         `[AUTOMATION] GUARD: Attempted to store date-only value "${value}" ` +
         `for field "${key}". Only full ISO-8601 timestamps are allowed in timestamp columns.`
