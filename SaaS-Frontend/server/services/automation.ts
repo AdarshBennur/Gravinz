@@ -293,7 +293,25 @@ export async function processUserAutomation(userId: string) {
     if (processedCount >= remainingQuota) break;
 
     // Terminal states — skip permanently
-    if (["replied", "bounced", "stopped", "manual_break", "failed", "rejected"].includes(contact.status || "")) continue;
+    // NOTE: "failed" is intentionally excluded — it was set by the old error handler and retried.
+    // NOTE: lock statuses (sending_first/f1/f2) are also excluded from permanent terminal list.
+    //       These are transient in-progress locks; if the server crashed mid-send, they must be
+    //       rolled back to their base status (not-sent/sent/followup-1) so the next cycle retries.
+    if (["replied", "bounced", "stopped", "manual_break", "rejected"].includes(contact.status || "")) continue;
+
+    // Roll back stale lock statuses (server crash / uncaught failure mid-send)
+    if (["sending_first", "sending_f1", "sending_f2"].includes(contact.status || "")) {
+      const rollbackStatus = contact.status === "sending_first" ? "not-sent"
+        : contact.status === "sending_f1" ? "sent"
+          : "followup-1";
+      console.warn(`[AUTOMATION] Stale lock detected for ${contact.email}: "${contact.status}" → rolling back to "${rollbackStatus}"`);
+      try {
+        await storage.updateContact(contact.id, userId, { status: rollbackStatus } as any);
+      } catch (e: any) {
+        console.error(`[AUTOMATION] Lock rollback failed for ${contact.email}:`, e.message);
+      }
+      continue; // Skip this cycle; contact will be picked up next cycle with clean status
+    }
 
     // ─── PER-CONTACT DEBUG LOG ──────────────────────────────────────────────
     console.log(`[AUTOMATION DEBUG] Evaluating contact: ${contact.email}`);
@@ -744,12 +762,22 @@ async function tryNotionSync(
     followup2Date?: Date | null;
   }
 ) {
+  console.log(`[NOTION SYNC START] contactId=${contactId} status="${status}" dates:`, {
+    firstEmailDate: dates.firstEmailDate ?? null,
+    followup1Date: dates.followup1Date ?? null,
+    followup2Date: dates.followup2Date ?? null,
+  });
   try {
     await syncContactStatusToNotion(userId, contactId, status, dates);
-    console.log(`[AUTOMATION] Notion sync complete for contactId=${contactId}`);
+    console.log(`[NOTION SYNC SUCCESS] contactId=${contactId} status="${status}"`);
   } catch (e: any) {
-    // Log error but never let Notion failure block the DB commit
-    console.error(`[Notion Sync Error] contactId=${contactId} status=${status}:`, e.message);
+    // Log full error context so we can diagnose property name mismatches, auth failures, etc.
+    console.error(`[NOTION SYNC FAILED] contactId=${contactId} status="${status}":`, {
+      message: e.message,
+      code: e.code,
+      status: e.status,
+      body: e.body,
+    });
   }
 }
 
