@@ -224,67 +224,103 @@ export async function sendEmail(
   }
 }
 
-export async function checkForReplies(userId: string): Promise<Array<{
+// ─────────────────────────────────────────────────────────────────────────────
+// THREAD-SPECIFIC REPLY DETECTION
+// Queries only the Gmail threads we actually sent campaign emails in.
+// Never scans the global inbox — eliminates all false positives from
+// unrelated emails the contact may have sent independently.
+//
+// For each campaign thread:
+//   1. Fetch the full thread via threads.get (not inbox scan)
+//   2. Find any message NOT from the user's own address
+//   3. Confirm the message arrived AFTER our send time
+//   4. If found → genuine reply. Otherwise → no reply.
+// ─────────────────────────────────────────────────────────────────────────────
+export async function checkForReplies(
+  userId: string,
+  campaignThreads: Array<{
+    contactId: string;
+    contactEmail: string;
+    threadId: string;
+    sentAt: Date; // timestamp of OUR first outbound message in this thread
+  }>
+): Promise<Array<{
+  contactId: string;
   contactEmail: string;
   threadId: string;
-  messageId: string;
-  snippet: string;
+  repliedAt: Date;
 }>> {
   if (process.env.MOCK_GMAIL === "true") {
-    console.log("[Gmail Mock] Checking for replies... (Mocking no replies)");
+    console.log("[Gmail Mock] Checking for replies... (mocking no replies)");
     return [];
   }
+
+  if (campaignThreads.length === 0) return [];
+
   const oauth2Client = await getAuthenticatedClient(userId);
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
+  // Determine our own Gmail address so we can exclude our outbound messages
+  const integration = await storage.getIntegration(userId, "gmail");
+  const ownEmail = ((integration?.metadata as any)?.email || "").toLowerCase();
+
   const replies: Array<{
+    contactId: string;
     contactEmail: string;
     threadId: string;
-    messageId: string;
-    snippet: string;
+    repliedAt: Date;
   }> = [];
 
-  try {
-    const response = await gmail.users.messages.list({
-      userId: "me",
-      q: "is:inbox newer_than:1d",
-      maxResults: 50,
-    });
+  for (const thread of campaignThreads) {
+    try {
+      console.log(`[Reply Check] Fetching thread ${thread.threadId} for contact ${thread.contactEmail}`);
 
-    const messages = response.data.messages || [];
-    console.log(`[Gmail Debug] Found ${messages.length} messages in inbox (newer_than:1d).`);
+      const threadData = await gmail.users.threads.get({
+        userId: "me",
+        id: thread.threadId,
+        format: "metadata",
+        metadataHeaders: ["From", "Date"],
+      });
 
-    for (const msg of messages) {
-      if (!msg.id) continue;
+      const messages = threadData.data.messages || [];
+      let foundReply = false;
 
-      try {
-        const detail = await gmail.users.messages.get({
-          userId: "me",
-          id: msg.id,
-          format: "metadata",
-          metadataHeaders: ["From", "Subject", "In-Reply-To"],
-        });
-
-        const headers = detail.data.payload?.headers || [];
+      for (const msg of messages) {
+        const headers = msg.payload?.headers || [];
         const from = headers.find((h) => h.name === "From")?.value || "";
         const emailMatch = from.match(/<(.+?)>/) || [null, from];
         const senderEmail = (emailMatch[1] || from).toLowerCase().trim();
-        const threadId = detail.data.threadId || "";
 
-        console.log(`[Gmail Debug] Analyzing Msg ${msg.id} | Thread ${threadId} | From: ${senderEmail}`);
+        // Skip our own outbound messages
+        if (senderEmail === ownEmail) continue;
 
+        // Parse timestamp — internalDate is ms since epoch
+        const internalDate = parseInt(msg.internalDate || "0", 10);
+        const msgDate = new Date(internalDate);
+
+        // Only count as reply if it arrived AFTER we sent the campaign email
+        if (msgDate <= thread.sentAt) {
+          console.log(`[Reply Check] Skipping pre-campaign message in thread ${thread.threadId} from ${senderEmail} (${msgDate.toISOString()} <= sent ${thread.sentAt.toISOString()})`);
+          continue;
+        }
+
+        console.log(`[Reply Check] ✅ Thread-specific reply from ${senderEmail} in thread ${thread.threadId} at ${msgDate.toISOString()}`);
         replies.push({
-          contactEmail: senderEmail,
-          threadId,
-          messageId: msg.id,
-          snippet: detail.data.snippet || "",
+          contactId: thread.contactId,
+          contactEmail: thread.contactEmail,
+          threadId: thread.threadId,
+          repliedAt: msgDate,
         });
-      } catch (e) {
-        console.error(`Failed to get message ${msg.id}:`, e);
+        foundReply = true;
+        break; // one confirmed reply per thread is enough
       }
+
+      if (!foundReply) {
+        console.log(`[Reply Check] No reply yet in thread ${thread.threadId} for ${thread.contactEmail}`);
+      }
+    } catch (e: any) {
+      console.error(`[Reply Check] Failed to fetch thread ${thread.threadId} for ${thread.contactEmail}:`, e.message);
     }
-  } catch (e) {
-    console.error("Failed to list messages:", e);
   }
 
   return replies;

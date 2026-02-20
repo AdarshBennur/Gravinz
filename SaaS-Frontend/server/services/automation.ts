@@ -25,13 +25,13 @@ export function startAutomationScheduler() {
     await runAutomationCycle();
   });
 
-  // Check replies every 10 minutes
-  replyCheckTask = cron.schedule("*/10 * * * *", async () => {
+  // Check replies every 2 minutes
+  replyCheckTask = cron.schedule("*/2 * * * *", async () => {
     console.log("[Automation] Checking for replies...");
     await runReplyCheck();
   });
 
-  console.log("[Automation] Scheduler started - send cycle every 5 min, reply check every 10 min");
+  console.log("[Automation] Scheduler started - send cycle every 5 min, reply check every 2 min");
 }
 
 export function stopAutomationScheduler() {
@@ -745,35 +745,70 @@ async function runReplyCheck() {
         const gmailIntegration = await storage.getIntegration(userId, "gmail");
         if (!gmailIntegration?.connected) continue;
 
-        const replies = await checkForReplies(userId);
         const contacts = await storage.getContacts(userId);
 
+        // ── BUILD CAMPAIGN THREAD LIST ────────────────────────────────────────
+        // For every active contact, find their first email send record.
+        // That record's gmailThreadId is the thread anchor for this outreach.
+        // We only check THOSE specific threads — never the global inbox.
+        const campaignThreads: Array<{
+          contactId: string;
+          contactEmail: string;
+          threadId: string;
+          sentAt: Date;
+        }> = [];
+
+        const terminalStatuses = ["replied", "bounced", "stopped", "manual_break", "rejected", "not-sent"];
+
+        for (const contact of contacts) {
+          if (terminalStatuses.includes(contact.status || "")) continue;
+
+          const emailSends = await storage.getEmailSendsForContact(userId, contact.id);
+          if (emailSends.length === 0) continue;
+
+          // Use the first send record as the thread anchor
+          const firstSend = emailSends[0];
+
+          if (!firstSend.gmailThreadId) {
+            console.warn(`[Reply Check] WARN: contact ${contact.email} has no stored gmailThreadId — cannot do thread-specific reply detection`);
+            continue;
+          }
+
+          campaignThreads.push({
+            contactId: contact.id,
+            contactEmail: contact.email,
+            threadId: firstSend.gmailThreadId,
+            sentAt: firstSend.sentAt ? new Date(firstSend.sentAt) : new Date(0),
+          });
+        }
+
+        console.log(`[Reply Check] Checking ${campaignThreads.length} campaign thread(s) for user ${userId}`);
+        if (campaignThreads.length === 0) continue;
+
+        // ── THREAD-SPECIFIC REPLY CHECK ───────────────────────────────────────
+        const replies = await checkForReplies(userId, campaignThreads);
+
         for (const reply of replies) {
-          const contact = contacts.find((c) => c.email.toLowerCase() === reply.contactEmail);
+          const contact = contacts.find((c) => c.id === reply.contactId);
           if (!contact || contact.status === "replied") continue;
 
-          // Verify reply is in a known thread
-          const emailSends = await storage.getEmailSendsForContact(userId, contact.id);
-          const matchingThread = emailSends.find((es) => es.gmailThreadId === reply.threadId);
+          console.log(`[AUTOMATION] Thread-specific reply from ${reply.contactEmail} in thread ${reply.threadId} at ${reply.repliedAt.toISOString()} — transitioning to "replied"`);
+          await storage.updateContact(contact.id, userId, { status: "replied" } as any);
+          await storage.createActivityLog(userId, {
+            contactName: contact.name,
+            action: "Reply received",
+            status: "replied",
+          });
 
-          if (matchingThread) {
-            console.log(`[AUTOMATION] Reply detected from ${contact.email} — transitioning to "replied"`);
-            await storage.updateContact(contact.id, userId, { status: "replied" } as any);
-            await storage.createActivityLog(userId, {
-              contactName: contact.name,
-              action: "Reply received",
-              status: "replied",
-            });
+          const tz = (await storage.getCampaignSettings(userId))?.timezone || "UTC";
+          const today = new Intl.DateTimeFormat("en-CA", { timeZone: tz }).format(new Date());
+          const usage = await storage.getDailyUsage(userId, today);
+          await storage.upsertDailyUsage(userId, today, {
+            repliesReceived: (usage?.repliesReceived ?? 0) + 1,
+          });
 
-            const today = new Date().toISOString().split("T")[0];
-            const usage = await storage.getDailyUsage(userId, today);
-            await storage.upsertDailyUsage(userId, today, {
-              repliesReceived: (usage?.repliesReceived ?? 0) + 1,
-            });
-
-            // Sync replied status to Notion (no dates to update for replies)
-            await tryNotionSync(userId, contact.id, "replied", {});
-          }
+          // Sync replied status to Notion
+          await tryNotionSync(userId, contact.id, "replied", {});
         }
       } catch (e: any) {
         console.error(`[Automation] Reply check error for user ${userId}:`, e.message);
