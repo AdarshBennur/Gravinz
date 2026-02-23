@@ -964,8 +964,8 @@ export async function registerRoutes(
     }
   });
 
-
   app.get("/api/dashboard", requireAuth, async (req, res) => {
+
     try {
       const userId = getUserId(req);
       const [stats, activity, settings] = await Promise.all([
