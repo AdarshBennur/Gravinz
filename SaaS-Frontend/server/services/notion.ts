@@ -134,7 +134,8 @@ export async function importContactsFromNotion(
   const errors: string[] = [];
   let imported = 0;
   let skipped = 0;
-  let rowNumber = 0;
+  let rowNumber = 0;        // 1-based counter for logging (includes skipped)
+  let notionIndex = 0;     // 0-based absolute position in Notion API results (never skips)
 
   console.log(`[Notion Import] Starting import from database ${databaseId} for user ${userId}`);
 
@@ -167,7 +168,14 @@ export async function importContactsFromNotion(
       database_id: databaseId,
       start_cursor: startCursor,
       page_size: 100,
-      // DO NOT SORT - preserve Notion's natural order
+      // Sort by "Sl No." ascending — guarantees deterministic, user-controlled order.
+      // If a row has no Sl No., Notion places it after numbered rows (nulls last).
+      sorts: [
+        {
+          property: "Sl No.",
+          direction: "ascending",
+        },
+      ],
     });
 
     console.log(`[Notion Import] Fetched ${response.results.length} pages from Notion`);
@@ -176,6 +184,8 @@ export async function importContactsFromNotion(
     console.log(`[Notion Debug] Page IDs in this batch:`, response.results.map(p => p.id));
 
     for (const page of response.results) {
+      const currentNotionIndex = notionIndex; // capture before any continue/skip
+      notionIndex++;
       rowNumber++;
       try {
         const props = (page as any).properties;
@@ -218,14 +228,22 @@ export async function importContactsFromNotion(
           continue;
         }
 
-        // ONLY SKIP IF: Email already exists for this user (duplicate check)
+        // RE-IMPORT: if contact already exists, update its notion_row_order and notion_data
+        // Use Sl No. value (same logic as fresh insert) for deterministic re-import order.
         if (email) {
           const existingContact = await storage.getContactByEmail(email, userId);
           if (existingContact) {
+            const reSlNoRaw = notionData["Sl No."];
+            const reSlNoValue = (reSlNoRaw !== null && reSlNoRaw !== undefined) ? Number(reSlNoRaw) : null;
+            const reResolvedOrder = reSlNoValue !== null && !Number.isNaN(reSlNoValue)
+              ? reSlNoValue
+              : currentNotionIndex;
+            await storage.updateContact(existingContact.id, userId, {
+              notionRowOrder: reResolvedOrder,
+              notionData: notionData,
+            } as any);
             skipped++;
-            const errorMsg = `Row ${rowNumber}: Duplicate email "${email}" - already exists`;
-            errors.push(errorMsg);
-            console.log(`[Notion Import] SKIPPED - ${errorMsg}`);
+            console.log(`[Notion Import] Row ${rowNumber} (Sl No.=${reSlNoValue ?? 'missing'}, rowOrder=${reResolvedOrder}): Duplicate "${email}" — notion_row_order updated`);
             continue;
           }
         }
@@ -336,7 +354,16 @@ export async function importContactsFromNotion(
           jobLink = notionData[columnMapping.jobLink] || null;
         }
 
-        // Store complete Notion row with ALL columns + preserve order
+        // Use the actual "Sl No." value as notionRowOrder — the user controls this
+        // field in Notion to set the exact import order. Falls back to the
+        // sequential API position (currentNotionIndex) when the field is absent.
+        const slNoRaw = notionData["Sl No."];
+        const slNoValue = (slNoRaw !== null && slNoRaw !== undefined) ? Number(slNoRaw) : null;
+        const resolvedRowOrder = slNoValue !== null && !Number.isNaN(slNoValue)
+          ? slNoValue
+          : currentNotionIndex;
+
+        // Store complete Notion row — notionRowOrder = Sl No. value (or API position fallback)
         const newContact = await storage.createContact(userId, {
           name: contactName,
           email: email,
@@ -346,7 +373,7 @@ export async function importContactsFromNotion(
           source: "notion",
           notionPageId: page.id,
           notionData: notionData,
-          notionRowOrder: rowNumber,
+          notionRowOrder: resolvedRowOrder,
           notionColumnOrder: columnOrder,
           firstEmailDate: firstEmailDate,
           followup1Date: followup1Date,
@@ -354,7 +381,7 @@ export async function importContactsFromNotion(
           jobLink: jobLink,
         } as any);
 
-        console.log(`[Notion Import] Row ${rowNumber} - IMPORTED successfully: ${email} (status="${validatedStatus}")`);
+        console.log(`[Notion Import] Row ${rowNumber} (Sl No.=${slNoValue ?? 'missing'}, rowOrder=${resolvedRowOrder}) - IMPORTED: ${email} (status="${validatedStatus}")`);
         imported++;
       } catch (e: any) {
         const errorMsg = `Row ${rowNumber}: Error - ${e.message}`;

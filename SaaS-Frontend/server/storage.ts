@@ -322,10 +322,12 @@ export class DatabaseStorage implements IStorage {
       .from("contacts")
       .select("*")
       .eq("user_id", userId)
-      .order("notion_row_order", { ascending: true, nullsFirst: false })
-      .order("created_at", { ascending: false });
+      // notion_row_order is the sole sort key — preserves exact Notion row order.
+      // nullsFirst: false puts manually-added contacts (no notion_row_order) at the end.
+      .order("notion_row_order", { ascending: true, nullsFirst: false });
     return data ? rowsToCamel<Contact>(data) : [];
   }
+
 
   async getContact(id: string, userId: string): Promise<Contact | undefined> {
     const { data } = await supabaseAdmin

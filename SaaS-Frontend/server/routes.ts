@@ -1423,6 +1423,7 @@ export async function registerRoutes(
             role: contact.role,
             status: displayStatus, // Notion value or DB value
             source: contact.source,
+            notionRowOrder: (contact as any).notionRowOrder ?? null, // Sl No. value — used for sort
             lastMessage: latestSend
               ? {
                 subject: latestSend.subject,
@@ -1439,13 +1440,20 @@ export async function registerRoutes(
 
           return threadObj;
         })
+        // Sort by Sl No. (notionRowOrder) ASC — exact Notion-controlled order.
+        // Contacts without a Sl No. (manually added) are placed last.
         .sort((a, b) => {
-          if (a.unread && !b.unread) return -1;
-          if (!a.unread && b.unread) return 1;
-          const aTime = a.lastMessage?.sentAt ? new Date(a.lastMessage.sentAt).getTime() : 0;
-          const bTime = b.lastMessage?.sentAt ? new Date(b.lastMessage.sentAt).getTime() : 0;
-          return bTime - aTime;
+          const aOrder = a.notionRowOrder;
+          const bOrder = b.notionRowOrder;
+          if (aOrder === null && bOrder === null) return 0;
+          if (aOrder === null) return 1;   // nulls last
+          if (bOrder === null) return -1;  // nulls last
+          return aOrder - bOrder;
         });
+
+      // Log sorted order for verification — visible in server terminal
+      console.log(`[Inbox] ${threads.length} threads ordered by Sl No.:`,
+        threads.map(t => `${t.notionRowOrder ?? 'manual'}→${t.email}`).join(', '));
 
       res.json(threads);
     } catch (error: any) {
