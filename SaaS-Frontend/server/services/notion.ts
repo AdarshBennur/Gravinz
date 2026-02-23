@@ -134,7 +134,8 @@ export async function importContactsFromNotion(
   const errors: string[] = [];
   let imported = 0;
   let skipped = 0;
-  let rowNumber = 0;
+  let rowNumber = 0;        // 1-based counter for logging (includes skipped)
+  let notionIndex = 0;     // 0-based absolute position in Notion API results (never skips)
 
   console.log(`[Notion Import] Starting import from database ${databaseId} for user ${userId}`);
 
@@ -176,6 +177,8 @@ export async function importContactsFromNotion(
     console.log(`[Notion Debug] Page IDs in this batch:`, response.results.map(p => p.id));
 
     for (const page of response.results) {
+      const currentNotionIndex = notionIndex; // capture before any continue/skip
+      notionIndex++;
       rowNumber++;
       try {
         const props = (page as any).properties;
@@ -218,14 +221,17 @@ export async function importContactsFromNotion(
           continue;
         }
 
-        // ONLY SKIP IF: Email already exists for this user (duplicate check)
+        // RE-IMPORT: if contact already exists, update its notion_row_order and notion_data
+        // so its position stays deterministic across re-imports. Never re-send emails.
         if (email) {
           const existingContact = await storage.getContactByEmail(email, userId);
           if (existingContact) {
+            await storage.updateContact(existingContact.id, userId, {
+              notionRowOrder: currentNotionIndex,
+              notionData: notionData,
+            } as any);
             skipped++;
-            const errorMsg = `Row ${rowNumber}: Duplicate email "${email}" - already exists`;
-            errors.push(errorMsg);
-            console.log(`[Notion Import] SKIPPED - ${errorMsg}`);
+            console.log(`[Notion Import] Row ${rowNumber} (index ${currentNotionIndex}): Duplicate "${email}" — notion_row_order updated to ${currentNotionIndex}`);
             continue;
           }
         }
@@ -336,7 +342,8 @@ export async function importContactsFromNotion(
           jobLink = notionData[columnMapping.jobLink] || null;
         }
 
-        // Store complete Notion row with ALL columns + preserve order
+        // Store complete Notion row — notionRowOrder uses the 0-based API position
+        // so order is deterministic and matches exactly what Notion returned.
         const newContact = await storage.createContact(userId, {
           name: contactName,
           email: email,
@@ -346,7 +353,7 @@ export async function importContactsFromNotion(
           source: "notion",
           notionPageId: page.id,
           notionData: notionData,
-          notionRowOrder: rowNumber,
+          notionRowOrder: currentNotionIndex,
           notionColumnOrder: columnOrder,
           firstEmailDate: firstEmailDate,
           followup1Date: followup1Date,
@@ -354,7 +361,7 @@ export async function importContactsFromNotion(
           jobLink: jobLink,
         } as any);
 
-        console.log(`[Notion Import] Row ${rowNumber} - IMPORTED successfully: ${email} (status="${validatedStatus}")`);
+        console.log(`[Notion Import] Row ${rowNumber} (index ${currentNotionIndex}) - IMPORTED: ${email} (status="${validatedStatus}")`);
         imported++;
       } catch (e: any) {
         const errorMsg = `Row ${rowNumber}: Error - ${e.message}`;
