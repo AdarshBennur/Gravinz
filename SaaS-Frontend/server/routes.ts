@@ -741,10 +741,15 @@ export async function registerRoutes(
       if (!settings) {
         settings = await storage.upsertCampaignSettings(userId, {});
       }
+      // autoRejectAfterDays is encoded as followupDelays[2] (no extra DB column needed)
+      const rawDelays: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];
+      const clientDelays = rawDelays.slice(0, 2);
+      const autoRejectAfterDays = rawDelays[2] !== undefined ? rawDelays[2] : 7;
       res.json({
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
-        delays: settings.followupDelays,
+        delays: clientDelays,
+        autoRejectAfterDays,
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
@@ -760,20 +765,27 @@ export async function registerRoutes(
   app.put("/api/campaign-settings", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const { dailyLimit, followups, delays, priority, balanced, startTime, timezone } = req.body;
+      const { dailyLimit, followups, delays, priority, balanced, startTime, timezone, autoRejectAfterDays } = req.body;
+      // Pack autoRejectAfterDays as delays[2] so it persists in the existing followup_delays column.
+      const packedDelays: number[] = Array.isArray(delays) ? [...delays] : [];
+      const rejection = autoRejectAfterDays !== undefined ? Number(autoRejectAfterDays) : 7;
+      packedDelays[2] = rejection; // slot 2 is our autoRejectAfterDays store
       const settings = await storage.upsertCampaignSettings(userId, {
         dailyLimit: dailyLimit ?? undefined,
         followupCount: followups ?? undefined,
-        followupDelays: delays ?? undefined,
+        followupDelays: packedDelays,
         priorityMode: priority ?? undefined,
         balancedRatio: balanced ?? undefined,
         startTime: startTime ?? undefined,
         timezone: timezone ?? undefined,
       });
+      // Decode for response
+      const savedDelays: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];
       res.json({
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
-        delays: settings.followupDelays,
+        delays: savedDelays.slice(0, 2),
+        autoRejectAfterDays: savedDelays[2] !== undefined ? savedDelays[2] : 7,
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
@@ -961,8 +973,8 @@ export async function registerRoutes(
     }
   });
 
-
   app.get("/api/dashboard", requireAuth, async (req, res) => {
+
     try {
       const userId = getUserId(req);
       const [stats, activity, settings] = await Promise.all([

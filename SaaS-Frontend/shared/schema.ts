@@ -151,6 +151,7 @@ export const campaignSettings = pgTable("campaign_settings", {
   dailyLimit: integer("daily_limit").default(80),
   followupCount: integer("followup_count").default(2),
   followupDelays: jsonb("followup_delays").$type<number[]>().default([2, 4]),
+  autoRejectAfterDays: integer("auto_reject_after_days").default(7),
   priorityMode: priorityModeEnum("priority_mode").default("balanced"),
   balancedRatio: integer("balanced_ratio").default(60),
   automationStatus: automationStatusEnum("automation_status").default("paused"),
