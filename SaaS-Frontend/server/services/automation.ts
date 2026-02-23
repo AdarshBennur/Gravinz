@@ -311,22 +311,14 @@ export async function processUserAutomation(userId: string) {
     totalContacts: contacts.length,
   });
 
-  // ─── SORT CONTACTS: FOLLOWUP-ELIGIBLE FIRST ──────────────────────────────
-  // Critical: if not-sent contacts appear first, they consume the entire cycle
-  // and followup-eligible contacts never get processed within the 5-min window.
-  // Priority: followup-1 > sent > not-sent (followups before first sends)
-  const statusPriority: Record<string, number> = {
-    "followup-1": 0,  // highest priority — these have been waiting longest
-    "sent": 1,        // next — eligible for followup-1
-    "not-sent": 2,    // lowest — first emails can wait
-  };
-  const sortedContacts = [...contacts].sort((a, b) => {
-    const pa = statusPriority[a.status || ""] ?? 99;
-    const pb = statusPriority[b.status || ""] ?? 99;
-    return pa - pb;
-  });
+  // ─── CONTACT ORDER: STRICT Sl No. ASC ───────────────────────────────────
+  // getContacts() already returns contacts sorted by notion_row_order (Sl No.) ASC.
+  // DO NOT re-sort here. Any re-sort would destroy the user's intended send order.
+  // Daily limit is applied by iterating in Sl No. order and stopping at remainingQuota.
+  console.log(`[AUTOMATION] Eligible contacts ordered by Sl No.:`,
+    contacts.map(c => `${(c as any).notionRowOrder ?? 'null'}→${c.email}`).join(', '));
 
-  for (const contact of sortedContacts) {
+  for (const contact of contacts) {
     if (processedCount >= remainingQuota) break;
 
     // Terminal states — skip permanently
