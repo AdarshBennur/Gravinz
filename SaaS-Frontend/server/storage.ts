@@ -405,52 +405,25 @@ export class DatabaseStorage implements IStorage {
 
   async upsertCampaignSettings(userId: string, settingsData: InsertCampaignSettings): Promise<CampaignSettings> {
     const existing = await this.getCampaignSettings(userId);
-
-    const attemptUpdate = async (payload: Record<string, any>): Promise<{ data: any; error: any }> => {
-      return supabaseAdmin
+    if (existing) {
+      const { data, error } = await supabaseAdmin
         .from("campaign_settings")
-        .update({ ...payload, updated_at: new Date().toISOString() })
+        .update({ ...keysToSnake(settingsData), updated_at: new Date().toISOString() })
         .eq("user_id", userId)
         .select()
         .single();
-    };
-
-    if (existing) {
-      const full = keysToSnake(settingsData);
-      let { data, error } = await attemptUpdate(full);
-
-      // PGRST204 = column not in schema cache (migration not yet applied).
-      // Retry without the new column so other settings still save successfully.
-      if (error?.code === "PGRST204") {
-        console.warn("[Storage] auto_reject_after_days column missing from DB — retrying without it. Run migration to fix permanently.");
-        const { auto_reject_after_days: _drop, ...rest } = full;
-        ({ data, error } = await attemptUpdate(rest));
-      }
-
       if (error) throw error;
       return keysToCamel<CampaignSettings>(data);
     }
-
-    const full = keysToSnake(settingsData);
-    let { data, error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("campaign_settings")
-      .insert({ ...full, user_id: userId })
+      .insert({ ...keysToSnake(settingsData), user_id: userId })
       .select()
       .single();
-
-    if (error?.code === "PGRST204") {
-      console.warn("[Storage] auto_reject_after_days column missing from DB — retrying insert without it.");
-      const { auto_reject_after_days: _drop, ...rest } = full;
-      ({ data, error } = await supabaseAdmin
-        .from("campaign_settings")
-        .insert({ ...rest, user_id: userId })
-        .select()
-        .single());
-    }
-
     if (error) throw error;
     return keysToCamel<CampaignSettings>(data);
   }
+
 
 
   // ─── Email Sends ───────────────────────────────────────────

@@ -247,10 +247,12 @@ export async function processUserAutomation(userId: string) {
   }
 
   const remainingQuota = dailyLimit - sentToday;
-  // How many days to wait after final follow-up before marking rejected.
-  // null = never auto-reject (manual only). 0 = immediate (legacy behavior).
-  const autoRejectAfterDays: number | null = settings.autoRejectAfterDays ?? 7;
+  // autoRejectAfterDays is stored as followupDelays[2] (no separate DB column needed).
+  // null-like (undefined) = never auto-reject. 0 = immediate. N = wait N days.
+  const _rawDelaysForReject: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];
+  const autoRejectAfterDays: number | null = _rawDelaysForReject[2] !== undefined ? _rawDelaysForReject[2] : 7;
   const contacts = await storage.getContacts(userId);
+
 
   // ─── CAMPAIGN SETTINGS: STRICT LOADING WITH FALLBACK WARNINGS ───────────
   // Log the raw DB values BEFORE any fallback so we can see exactly what
