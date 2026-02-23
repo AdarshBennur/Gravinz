@@ -1423,6 +1423,7 @@ export async function registerRoutes(
             role: contact.role,
             status: displayStatus, // Notion value or DB value
             source: contact.source,
+            notionRowOrder: (contact as any).notionRowOrder ?? null, // preserved for sort
             lastMessage: latestSend
               ? {
                 subject: latestSend.subject,
@@ -1439,13 +1440,21 @@ export async function registerRoutes(
 
           return threadObj;
         })
+        // ORDER BY notion_row_order ASC — preserves exact Notion row order.
+        // Contacts without notion_row_order (manually added) are placed last.
+        // No other sort criteria — Notion order is authoritative and exclusive.
         .sort((a, b) => {
-          if (a.unread && !b.unread) return -1;
-          if (!a.unread && b.unread) return 1;
-          const aTime = a.lastMessage?.sentAt ? new Date(a.lastMessage.sentAt).getTime() : 0;
-          const bTime = b.lastMessage?.sentAt ? new Date(b.lastMessage.sentAt).getTime() : 0;
-          return bTime - aTime;
+          const aOrder = a.notionRowOrder;
+          const bOrder = b.notionRowOrder;
+          if (aOrder === null && bOrder === null) return 0;
+          if (aOrder === null) return 1;  // nulls last
+          if (bOrder === null) return -1; // nulls last
+          return aOrder - bOrder;
         });
+
+      // DEBUG: log sorted order so user can verify backend matches Notion
+      console.log(`[Inbox] Returning ${threads.length} threads in notion_row_order:`,
+        threads.map(t => `${t.notionRowOrder ?? 'null'} → ${t.email}`).join(', '));
 
       res.json(threads);
     } catch (error: any) {
