@@ -183,8 +183,7 @@ export default function InboxPage() {
     queryKey: ["/api/inbox/threads", activeContactId, "gmail"],
     queryFn: () => apiGet<GmailThreadResponse>(`/api/inbox/threads/${activeContactId}/gmail`),
     enabled: !!activeContactId,
-    staleTime: 0, // always re-fetch — real-time Gmail state
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
   });
 
   const clearContactsMutation = useMutation({
@@ -331,7 +330,7 @@ export default function InboxPage() {
               <div className="flex-1 grid place-items-center text-muted-foreground text-sm">
                 Select a contact to view conversation
               </div>
-            ) : detailLoading || gmailLoading ? (
+            ) : detailLoading ? (
               <div className="p-6 space-y-4">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <Skeleton key={i} className={`h-24 w-3/4 rounded-2xl ${i % 2 === 1 ? "ml-auto" : ""}`} />
@@ -341,85 +340,145 @@ export default function InboxPage() {
               <div className="flex-1 grid place-items-center text-muted-foreground text-sm">
                 Contact not found
               </div>
-            ) : (
-              <>
-                {/* Thread header */}
-                <div className="p-4 border-b flex items-center justify-between shrink-0">
-                  <div>
-                    <div className="font-semibold text-sm">{detail.contact.name}</div>
-                    <div className="text-xs text-muted-foreground">{detail.contact.email}</div>
+            ) : (() => {
+              // ─── Message source resolution ────────────────────────────────
+              // Priority 1: Gmail thread messages (outbound + inbound, real-time)
+              // Priority 2: Local email_sends from DB (outbound only, always available)
+              const gmailMessages = gmailThread?.messages ?? [];
+              const localMessages = detail.thread ?? [];
+              const usingGmail = gmailMessages.length > 0;
+              const usingFallback = !usingGmail && localMessages.length > 0;
+              const hasAny = usingGmail || usingFallback;
+
+              if (usingGmail) {
+                console.log(`[Inbox] Rendering ${gmailMessages.length} Gmail messages for contact`);
+              } else if (usingFallback) {
+                console.log(`[Inbox] Gmail unavailable — falling back to ${localMessages.length} DB messages`);
+              }
+
+              return (
+                <>
+                  {/* Thread header */}
+                  <div className="p-4 border-b flex items-center justify-between shrink-0">
+                    <div>
+                      <div className="font-semibold text-sm">{detail.contact.name}</div>
+                      <div className="text-xs text-muted-foreground">{detail.contact.email}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {usingFallback && (
+                        <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          local only
+                        </span>
+                      )}
+                      <Badge variant={statusVariant[detail.contact.status] || "secondary"} className="rounded-full">
+                        {detail.contact.status || "—"}
+                      </Badge>
+                    </div>
                   </div>
-                  <Badge variant={statusVariant[detail.contact.status] || "secondary"} className="rounded-full">
-                    {detail.contact.status || "—"}
-                  </Badge>
-                </div>
 
-                {/* Chat bubble area */}
-                <div className="flex-1 overflow-y-auto min-h-0">
-                  <div className="flex flex-col gap-3 p-4">
-                    {/* No thread ID fallback */}
-                    {gmailThread?.error === "no_thread_id" && (
-                      <div className="text-center text-xs text-muted-foreground py-6 bg-muted/40 rounded-xl">
-                        <Mail className="mx-auto h-6 w-6 mb-2 opacity-40" />
-                        Conversation unavailable — no thread ID found.
-                        <br />This contact has not been emailed yet via automation.
-                      </div>
-                    )}
+                  {/* Chat bubble area */}
+                  <div className="flex-1 overflow-y-auto min-h-0">
+                    <div className="flex flex-col gap-3 p-4">
 
-                    {/* Gmail fetch error */}
-                    {gmailThread?.error && gmailThread.error !== "no_thread_id" && (
-                      <div className="text-center text-xs text-destructive py-4 bg-destructive/5 rounded-xl">
-                        Could not load Gmail thread: {gmailThread.error}
-                      </div>
-                    )}
+                      {/* Gmail API fetch error (non-critical) */}
+                      {gmailThread?.error && gmailThread.error !== "no_thread_id" && (
+                        <div className="text-center text-xs text-amber-600 py-2 bg-amber-50 dark:bg-amber-950/20 rounded-xl">
+                          Gmail thread unavailable ({gmailThread.error}) — showing local records
+                        </div>
+                      )}
 
-                    {/* Messages */}
-                    {(gmailThread?.messages ?? []).length === 0 && !gmailThread?.error && (
-                      <div className="text-center text-sm text-muted-foreground py-12">
-                        <Send className="mx-auto h-8 w-8 mb-2 opacity-40" />
-                        No emails sent to this contact yet
-                      </div>
-                    )}
+                      {/* Empty state — only when truly nothing to show */}
+                      {!hasAny && gmailLoading && (
+                        <div className="space-y-4">
+                          {Array.from({ length: 2 }).map((_, i) => (
+                            <Skeleton key={i} className={`h-20 w-3/4 rounded-2xl ${i % 2 === 1 ? "ml-auto" : ""}`} />
+                          ))}
+                        </div>
+                      )}
 
-                    {(gmailThread?.messages ?? []).map((msg) => {
-                      const isOutbound = msg.direction === "outbound";
-                      return (
-                        <div
-                          key={msg.gmailMessageId}
-                          className={`flex flex-col max-w-[78%] gap-1 ${isOutbound ? "self-end items-end" : "self-start items-start"
-                            }`}
-                        >
-                          {/* Sender label + timestamp */}
-                          <div className={`flex items-center gap-2 text-[10px] text-muted-foreground px-1 ${isOutbound ? "flex-row-reverse" : "flex-row"
-                            }`}>
-                            <span className="font-medium">{isOutbound ? "You" : msg.senderName}</span>
-                            <span>{formatFullDate(msg.sentAt, tz)}</span>
-                          </div>
+                      {!hasAny && !gmailLoading && (
+                        <div className="text-center text-sm text-muted-foreground py-12">
+                          <Send className="mx-auto h-8 w-8 mb-2 opacity-40" />
+                          No emails sent to this contact yet
+                        </div>
+                      )}
 
-                          {/* Bubble */}
+                      {/* ── GMAIL MESSAGES (Priority 1) ── */}
+                      {usingGmail && gmailMessages.map((msg) => {
+                        const isOutbound = msg.direction === "outbound";
+                        return (
                           <div
-                            className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words ${isOutbound
-                                ? "bg-primary text-primary-foreground rounded-tr-sm"
-                                : "bg-muted text-foreground rounded-tl-sm"
+                            key={msg.gmailMessageId}
+                            className={`flex flex-col max-w-[78%] gap-1 ${isOutbound ? "self-end items-end" : "self-start items-start"
                               }`}
                           >
-                            {/* Subject on first message or if different */}
-                            {msg.subject && (
-                              <div className={`text-[10px] font-semibold mb-1.5 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"
-                                }`}>
-                                {msg.subject}
-                              </div>
-                            )}
-                            {msg.body}
+                            <div className={`flex items-center gap-2 text-[10px] text-muted-foreground px-1 ${isOutbound ? "flex-row-reverse" : "flex-row"
+                              }`}>
+                              <span className="font-medium">{isOutbound ? "You" : msg.senderName}</span>
+                              <span>{formatFullDate(msg.sentAt, tz)}</span>
+                            </div>
+                            <div
+                              className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words ${isOutbound
+                                ? "bg-primary text-primary-foreground rounded-tr-sm"
+                                : "bg-muted text-foreground rounded-tl-sm"
+                                }`}
+                            >
+                              {msg.subject && (
+                                <div className={`text-[10px] font-semibold mb-1.5 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"
+                                  }`}>
+                                  {msg.subject}
+                                </div>
+                              )}
+                              {msg.body}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+
+                      {/* ── FALLBACK: LOCAL DB MESSAGES (Priority 2) ── */}
+                      {usingFallback && localMessages.map((msg) => {
+                        // Strip HTML tags for display
+                        const plainBody = (msg.body || "")
+                          .replace(/<br\s*\/?>/gi, "\n")
+                          .replace(/<\/p>/gi, "\n")
+                          .replace(/<[^>]+>/g, "")
+                          .replace(/&nbsp;/g, " ")
+                          .replace(/&amp;/g, "&")
+                          .replace(/\n{3,}/g, "\n\n")
+                          .trim();
+                        return (
+                          <div
+                            key={msg.id}
+                            className="flex flex-col max-w-[78%] gap-1 self-end items-end"
+                          >
+                            <div className="flex items-center gap-2 text-[10px] text-muted-foreground px-1 flex-row-reverse">
+                              <span className="font-medium">You</span>
+                              <span>{formatFullDate(msg.sentAt, tz)}</span>
+                              {msg.followupNumber != null && (
+                                <span className="text-[10px] text-muted-foreground/60">
+                                  {msg.followupNumber === 0 ? "Initial" : `Follow-up ${msg.followupNumber}`}
+                                </span>
+                              )}
+                            </div>
+                            <div className="rounded-2xl rounded-tr-sm px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words bg-primary text-primary-foreground">
+                              {msg.subject && (
+                                <div className="text-[10px] font-semibold mb-1.5 text-primary-foreground/70">
+                                  {msg.subject}
+                                </div>
+                              )}
+                              {plainBody || msg.body}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                    </div>
                   </div>
-                </div>
-              </>
-            )}
+                </>
+              );
+            })()}
           </div>
+
 
           {/* RIGHT PANEL - Contact Details & Analytics */}
           <div className="hidden w-[300px] flex-col shrink-0 lg:flex">
