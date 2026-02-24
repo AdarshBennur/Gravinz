@@ -1462,6 +1462,52 @@ export async function registerRoutes(
     }
   });
 
+  // ─── GMAIL THREAD CONVERSATION ─────────────────────────────────────────────
+  // IMPORTANT: This MUST be registered BEFORE /api/inbox/threads/:contactId
+  // because Express matches routes in order. Without this ordering, :contactId
+  // would greedily match the URL and the /gmail suffix would be ignored.
+  app.get("/api/inbox/threads/:contactId/gmail", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const contactId = req.params.contactId as string;
+
+      console.log(`[Inbox Thread Fetch] Request — contactId: ${contactId}, userId: ${userId}`);
+
+      const contact = await storage.getContact(contactId, userId);
+      if (!contact) {
+        console.log(`[Inbox Thread Fetch] Contact ${contactId} not found for userId ${userId}`);
+        return res.status(404).json({ message: "Contact not found" });
+      }
+
+      // Find stored gmailThreadId from email_sends
+      const sends = await storage.getEmailSendsForContact(userId, contactId);
+      console.log(`[Inbox Thread Fetch] Found ${sends.length} email_send records for ${contact.email}`);
+
+      const threadIdRow = sends.find((s) => s.gmailThreadId);
+      const gmailThreadId = threadIdRow?.gmailThreadId ?? null;
+
+      if (!gmailThreadId) {
+        console.log(`[Inbox Thread Fetch] No gmailThreadId stored for ${contact.email} — returning empty`);
+        return res.json({ messages: [], gmailThreadId: null, error: "no_thread_id" });
+      }
+
+      console.log(`[Inbox Thread Fetch] Fetching Gmail thread ${gmailThreadId} for ${contact.email}`);
+
+      const { getGmailThreadMessages } = await import("./services/gmail.ts");
+      const messages = await getGmailThreadMessages(userId, gmailThreadId);
+
+      console.log(`[Inbox Thread Fetch] ✅ Got ${messages.length} messages from Gmail thread ${gmailThreadId}`);
+      messages.forEach((m: any, i: number) => {
+        console.log(`  [${i + 1}] ${m.direction.toUpperCase()} | from: ${m.senderEmail} | ${new Date(m.sentAt).toLocaleTimeString()}`);
+      });
+
+      return res.json({ messages, gmailThreadId });
+    } catch (error: any) {
+      console.error(`[Inbox Thread Fetch] ERROR:`, error.message);
+      return res.status(200).json({ messages: [], gmailThreadId: null, error: error.message });
+    }
+  });
+
   app.get("/api/inbox/threads/:contactId", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -1522,39 +1568,6 @@ export async function registerRoutes(
     }
   });
 
-  // ─── GMAIL THREAD CONVERSATION — real-time fetch from Gmail API ───────────
-  // Returns all messages (outbound + inbound) in the Gmail thread, sorted
-  // by internalDate ASC. Used by the Inbox chat-bubble conversation view.
-  app.get("/api/inbox/threads/:contactId/gmail", requireAuth, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const contactId = req.params.contactId as string;
-
-      const contact = await storage.getContact(contactId, userId);
-      if (!contact) {
-        return res.status(404).json({ message: "Contact not found" });
-      }
-
-      // Find the most recent email send for this contact to get the gmailThreadId
-      const sends = await storage.getEmailSendsForContact(userId, contactId);
-      const threadIdRow = sends.find((s) => s.gmailThreadId);
-      const gmailThreadId = threadIdRow?.gmailThreadId ?? null;
-
-      if (!gmailThreadId) {
-        console.log(`[Inbox Thread Fetch] No gmailThreadId for contact ${contact.email}`);
-        return res.json({ messages: [], gmailThreadId: null, error: "no_thread_id" });
-      }
-
-      const { getGmailThreadMessages } = await import("./services/gmail.ts");
-      const messages = await getGmailThreadMessages(userId, gmailThreadId);
-
-      return res.json({ messages, gmailThreadId });
-    } catch (error: any) {
-      console.error("Inbox Gmail thread fetch error:", error);
-      // Return empty rather than crashing the UI
-      return res.status(200).json({ messages: [], gmailThreadId: null, error: error.message });
-    }
-  });
 
   app.get("/api/email-sends", requireAuth, async (req, res) => {
     try {
