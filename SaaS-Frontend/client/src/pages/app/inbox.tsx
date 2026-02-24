@@ -72,6 +72,24 @@ interface ThreadMessage {
   direction: "outbound" | "inbound";
 }
 
+interface GmailMessage {
+  gmailMessageId: string;
+  gmailThreadId: string;
+  direction: "outbound" | "inbound";
+  from: string;
+  senderName: string;
+  subject: string;
+  body: string;
+  sentAt: string;
+  internalDate: number;
+}
+
+interface GmailThreadResponse {
+  messages: GmailMessage[];
+  gmailThreadId: string | null;
+  error?: string;
+}
+
 interface ThreadDetail {
   contact: {
     id: string;
@@ -158,6 +176,15 @@ export default function InboxPage() {
     queryKey: ["/api/inbox/threads", activeContactId],
     queryFn: () => apiGet<ThreadDetail>(`/api/inbox/threads/${activeContactId}`),
     enabled: !!activeContactId,
+  });
+
+  // Real-time Gmail thread fetch — outbound + inbound messages from Gmail API
+  const { data: gmailThread, isLoading: gmailLoading } = useQuery<GmailThreadResponse>({
+    queryKey: ["/api/inbox/threads", activeContactId, "gmail"],
+    queryFn: () => apiGet<GmailThreadResponse>(`/api/inbox/threads/${activeContactId}/gmail`),
+    enabled: !!activeContactId,
+    staleTime: 0, // always re-fetch — real-time Gmail state
+    refetchOnWindowFocus: true,
   });
 
   const clearContactsMutation = useMutation({
@@ -304,10 +331,10 @@ export default function InboxPage() {
               <div className="flex-1 grid place-items-center text-muted-foreground text-sm">
                 Select a contact to view conversation
               </div>
-            ) : detailLoading ? (
+            ) : detailLoading || gmailLoading ? (
               <div className="p-6 space-y-4">
                 {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-32 w-full rounded-xl" />
+                  <Skeleton key={i} className={`h-24 w-3/4 rounded-2xl ${i % 2 === 1 ? "ml-auto" : ""}`} />
                 ))}
               </div>
             ) : !detail ? (
@@ -316,7 +343,8 @@ export default function InboxPage() {
               </div>
             ) : (
               <>
-                <div className="p-4 border-b flex items-center justify-between">
+                {/* Thread header */}
+                <div className="p-4 border-b flex items-center justify-between shrink-0">
                   <div>
                     <div className="font-semibold text-sm">{detail.contact.name}</div>
                     <div className="text-xs text-muted-foreground">{detail.contact.email}</div>
@@ -326,61 +354,67 @@ export default function InboxPage() {
                   </Badge>
                 </div>
 
+                {/* Chat bubble area */}
                 <div className="flex-1 overflow-y-auto min-h-0">
-                  <div className="p-4 space-y-4">
-                    {detail.thread.length === 0 ? (
+                  <div className="flex flex-col gap-3 p-4">
+                    {/* No thread ID fallback */}
+                    {gmailThread?.error === "no_thread_id" && (
+                      <div className="text-center text-xs text-muted-foreground py-6 bg-muted/40 rounded-xl">
+                        <Mail className="mx-auto h-6 w-6 mb-2 opacity-40" />
+                        Conversation unavailable — no thread ID found.
+                        <br />This contact has not been emailed yet via automation.
+                      </div>
+                    )}
+
+                    {/* Gmail fetch error */}
+                    {gmailThread?.error && gmailThread.error !== "no_thread_id" && (
+                      <div className="text-center text-xs text-destructive py-4 bg-destructive/5 rounded-xl">
+                        Could not load Gmail thread: {gmailThread.error}
+                      </div>
+                    )}
+
+                    {/* Messages */}
+                    {(gmailThread?.messages ?? []).length === 0 && !gmailThread?.error && (
                       <div className="text-center text-sm text-muted-foreground py-12">
                         <Send className="mx-auto h-8 w-8 mb-2 opacity-40" />
                         No emails sent to this contact yet
                       </div>
-                    ) : (
-                      detail.thread.map((msg) => (
-                        <div key={msg.id} className="rounded-xl border bg-background/70 p-4">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <EmailStatusIcon status={msg.status} />
-                              <span className="text-xs font-medium">
-                                {!msg.followupNumber ? "Initial Email" : `Follow-Up ${msg.followupNumber}`}
-                              </span>
-                            </div>
-                            <span className="text-[10px] text-muted-foreground">
-                              {formatFullDate(msg.sentAt, tz)}
-                            </span>
+                    )}
+
+                    {(gmailThread?.messages ?? []).map((msg) => {
+                      const isOutbound = msg.direction === "outbound";
+                      return (
+                        <div
+                          key={msg.gmailMessageId}
+                          className={`flex flex-col max-w-[78%] gap-1 ${isOutbound ? "self-end items-end" : "self-start items-start"
+                            }`}
+                        >
+                          {/* Sender label + timestamp */}
+                          <div className={`flex items-center gap-2 text-[10px] text-muted-foreground px-1 ${isOutbound ? "flex-row-reverse" : "flex-row"
+                            }`}>
+                            <span className="font-medium">{isOutbound ? "You" : msg.senderName}</span>
+                            <span>{formatFullDate(msg.sentAt, tz)}</span>
                           </div>
 
-                          {msg.subject && (
-                            <div className="mt-2 text-sm font-medium">{msg.subject}</div>
-                          )}
-
-                          <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                          {/* Bubble */}
+                          <div
+                            className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words ${isOutbound
+                                ? "bg-primary text-primary-foreground rounded-tr-sm"
+                                : "bg-muted text-foreground rounded-tl-sm"
+                              }`}
+                          >
+                            {/* Subject on first message or if different */}
+                            {msg.subject && (
+                              <div className={`text-[10px] font-semibold mb-1.5 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"
+                                }`}>
+                                {msg.subject}
+                              </div>
+                            )}
                             {msg.body}
                           </div>
-
-                          <div className="mt-3 flex items-center gap-3 text-[10px] text-muted-foreground">
-                            {msg.sentAt && (
-                              <span className="flex items-center gap-1">
-                                <Send className="h-3 w-3" /> Sent
-                              </span>
-                            )}
-                            {msg.openedAt && (
-                              <span className="flex items-center gap-1">
-                                <MailOpen className="h-3 w-3 text-blue-500" /> Opened {formatThreadTime(msg.openedAt, tz)}
-                              </span>
-                            )}
-                            {msg.repliedAt && (
-                              <span className="flex items-center gap-1">
-                                <Reply className="h-3 w-3 text-green-500" /> Replied {formatThreadTime(msg.repliedAt, tz)}
-                              </span>
-                            )}
-                            {msg.status === "bounced" && (
-                              <span className="flex items-center gap-1 text-destructive">
-                                <XCircle className="h-3 w-3" /> Bounced
-                              </span>
-                            )}
-                          </div>
                         </div>
-                      ))
-                    )}
+                      );
+                    })}
                   </div>
                 </div>
               </>
