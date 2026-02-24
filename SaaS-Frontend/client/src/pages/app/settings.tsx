@@ -106,6 +106,7 @@ interface ProfileData {
     description?: string;
     promptOverride?: string;
     resumeUrl?: string;
+    resumeOriginalName?: string;
   } | null;
   experiences: Experience[];
   projects: Project[];
@@ -125,6 +126,7 @@ export default function ProfileSettingsPage() {
 
   const [dragOver, setDragOver] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [resumeRemoved, setResumeRemoved] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   const { data, isLoading } = useQuery<ProfileData>({
@@ -144,16 +146,20 @@ export default function ProfileSettingsPage() {
       setExperiences(data.experiences ?? []);
       setProjects(data.projects ?? []);
       if (p?.resumeUrl) {
-        // Extract filename from URL or show default
-        const name = p.resumeUrl.split('/').pop();
-        setFileName(name || "Uploaded Resume");
+        // Use stored original filename; fall back to "Uploaded Resume" for legacy entries
+        setFileName(p.resumeOriginalName || "Uploaded Resume");
+        setResumeRemoved(false);
       }
     }
   }, [data]);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      apiPut("/api/profile", {
+    mutationFn: async () => {
+      // If marked for removal, delete resume first
+      if (resumeRemoved) {
+        await apiDelete("/api/profile/resume");
+      }
+      return apiPut("/api/profile", {
         skills,
         roles,
         tone,
@@ -162,7 +168,8 @@ export default function ProfileSettingsPage() {
         promptOverride,
         experiences,
         projects,
-      }),
+      });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
       toast({ title: "Saved", description: "All settings saved successfully." });
@@ -209,6 +216,7 @@ export default function ProfileSettingsPage() {
 
       const json = await res.json();
       setFileName(file.name);
+      setResumeRemoved(false);
       toast({ title: "Resume Uploaded", description: "Your resume has been successfully saved." });
       queryClient.invalidateQueries({ queryKey: ["/api/profile"] });
     } catch (error) {
@@ -542,7 +550,10 @@ export default function ProfileSettingsPage() {
                   />
                 </div>
                 {fileName && (
-                  <Button variant="ghost" className="w-full" onClick={() => setFileName(null)}>Remove</Button>
+                  <Button variant="ghost" className="w-full" onClick={() => {
+                    setFileName(null);
+                    setResumeRemoved(true);
+                  }}>Remove</Button>
                 )}
                 {fileName && <div className="text-xs text-muted-foreground break-all">{fileName}</div>}
               </div>

@@ -134,7 +134,8 @@ export async function importContactsFromNotion(
   const errors: string[] = [];
   let imported = 0;
   let skipped = 0;
-  let rowNumber = 0;
+  let rowNumber = 0;        // 1-based counter for logging (includes skipped)
+  let notionIndex = 0;     // 0-based absolute position in Notion API results (never skips)
 
   console.log(`[Notion Import] Starting import from database ${databaseId} for user ${userId}`);
 
@@ -167,7 +168,14 @@ export async function importContactsFromNotion(
       database_id: databaseId,
       start_cursor: startCursor,
       page_size: 100,
-      // DO NOT SORT - preserve Notion's natural order
+      // Sort by "Sl No." ascending — guarantees deterministic, user-controlled order.
+      // If a row has no Sl No., Notion places it after numbered rows (nulls last).
+      sorts: [
+        {
+          property: "Sl No.",
+          direction: "ascending",
+        },
+      ],
     });
 
     console.log(`[Notion Import] Fetched ${response.results.length} pages from Notion`);
@@ -176,6 +184,8 @@ export async function importContactsFromNotion(
     console.log(`[Notion Debug] Page IDs in this batch:`, response.results.map(p => p.id));
 
     for (const page of response.results) {
+      const currentNotionIndex = notionIndex; // capture before any continue/skip
+      notionIndex++;
       rowNumber++;
       try {
         const props = (page as any).properties;
@@ -191,6 +201,8 @@ export async function importContactsFromNotion(
         }
 
         console.log(`[Notion Import] Row ${rowNumber} - Extracted ${columnOrder.length} columns in schema order`);
+        // DIAGNOSTIC: Log exact property keys from this Notion page
+        console.log(`[COLUMN KEYS] Row ${rowNumber}: ${JSON.stringify(Object.keys(props))}`);
 
         // Extract email for duplicate checking (if column mapping exists, use it; otherwise auto-detect)
         let email: string | null = null;
@@ -216,14 +228,22 @@ export async function importContactsFromNotion(
           continue;
         }
 
-        // ONLY SKIP IF: Email already exists for this user (duplicate check)
+        // RE-IMPORT: if contact already exists, update its notion_row_order and notion_data
+        // Use Sl No. value (same logic as fresh insert) for deterministic re-import order.
         if (email) {
           const existingContact = await storage.getContactByEmail(email, userId);
           if (existingContact) {
+            const reSlNoRaw = notionData["Sl No."];
+            const reSlNoValue = (reSlNoRaw !== null && reSlNoRaw !== undefined) ? Number(reSlNoRaw) : null;
+            const reResolvedOrder = reSlNoValue !== null && !Number.isNaN(reSlNoValue)
+              ? reSlNoValue
+              : currentNotionIndex;
+            await storage.updateContact(existingContact.id, userId, {
+              notionRowOrder: reResolvedOrder,
+              notionData: notionData,
+            } as any);
             skipped++;
-            const errorMsg = `Row ${rowNumber}: Duplicate email "${email}" - already exists`;
-            errors.push(errorMsg);
-            console.log(`[Notion Import] SKIPPED - ${errorMsg}`);
+            console.log(`[Notion Import] Row ${rowNumber} (Sl No.=${reSlNoValue ?? 'missing'}, rowOrder=${reResolvedOrder}): Duplicate "${email}" — notion_row_order updated`);
             continue;
           }
         }
@@ -271,25 +291,97 @@ export async function importContactsFromNotion(
           if (rawStatus) status = mapNotionStatusToInternal(rawStatus);
         }
 
-        // Store complete Notion row with ALL columns + preserve order
+        // ─── EXTRACT DATE FIELDS FROM NOTION ─────────────────────────────────
+        // These MUST be populated when status implies they should exist.
+        let firstEmailDate: Date | null = null;
+        let followup1Date: Date | null = null;
+        let followup2Date: Date | null = null;
+
+        const firstEmailDateKey = columnMapping?.firstEmailDate || "First Email Date";
+        const followup1DateKey = columnMapping?.followup1Date || "Follow-up 1 Date";
+        const followup2DateKey = columnMapping?.followup2Date || "Follow-up 2 Date";
+
+        // ─── DATE DIAGNOSTIC: Log raw Notion property type + value ───────────
+        for (const dKey of [firstEmailDateKey, followup1DateKey, followup2DateKey]) {
+          const rawProp = props[dKey];
+          if (rawProp) {
+            console.log(`[DATE DIAGNOSTIC] Row ${rowNumber} (${email}): Column "${dKey}" → type="${rawProp.type}", raw=${JSON.stringify(rawProp).substring(0, 200)}`);
+          } else {
+            console.warn(`[DATE DIAGNOSTIC] Row ${rowNumber} (${email}): Column "${dKey}" → NOT FOUND in props. Available keys: ${JSON.stringify(Object.keys(props))}`);
+          }
+          console.log(`[DATE DIAGNOSTIC] notionData["${dKey}"] = ${JSON.stringify(notionData[dKey])}`);
+        }
+
+        // Step 1: Try extracting from notionData (already processed by extractNotionValue)
+        // Step 2: If null, try extracting directly from raw Notion property (fallback)
+        firstEmailDate = safeParseDateValue(notionData[firstEmailDateKey]) || extractDateFromRawProperty(props[firstEmailDateKey]);
+        followup1Date = safeParseDateValue(notionData[followup1DateKey]) || extractDateFromRawProperty(props[followup1DateKey]);
+        followup2Date = safeParseDateValue(notionData[followup2DateKey]) || extractDateFromRawProperty(props[followup2DateKey]);
+
+        console.log(`[DATE EXTRACTION RESULT] Row ${rowNumber} (${email}): firstEmailDate=${firstEmailDate?.toISOString() || "NULL"}, followup1Date=${followup1Date?.toISOString() || "NULL"}, followup2Date=${followup2Date?.toISOString() || "NULL"}`);
+
+        // ─── DATA CONSISTENCY VALIDATION ─────────────────────────────────────
+        // STATUS IS NEVER DOWNGRADED. If dates are missing, we log loudly
+        // but preserve the original status from Notion. The import layer
+        // must NEVER silently alter status due to extraction failure.
+        const effectiveStatus = status || "not-sent";
+        const validatedStatus = effectiveStatus; // PRESERVED — no mutation
+
+        if (effectiveStatus === "sent" && !firstEmailDate) {
+          console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="sent" but firstEmailDate extraction FAILED. STATUS PRESERVED as "sent". Check column name "${firstEmailDateKey}" and property type.`);
+        } else if (effectiveStatus === "followup-1") {
+          if (!firstEmailDate) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-1" but firstEmailDate extraction FAILED. STATUS PRESERVED. Check column "${firstEmailDateKey}".`);
+          }
+          if (!followup1Date) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-1" but followup1Date extraction FAILED. STATUS PRESERVED. Check column "${followup1DateKey}".`);
+          }
+        } else if (effectiveStatus === "followup-2") {
+          if (!firstEmailDate) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-2" but firstEmailDate extraction FAILED. STATUS PRESERVED. Check column "${firstEmailDateKey}".`);
+          }
+          if (!followup1Date) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-2" but followup1Date extraction FAILED. STATUS PRESERVED. Check column "${followup1DateKey}".`);
+          }
+          if (!followup2Date) {
+            console.error(`[IMPORT FAILURE] Row ${rowNumber} (${email}): status="followup-2" but followup2Date extraction FAILED. STATUS PRESERVED. Check column "${followup2DateKey}".`);
+          }
+        }
+
+        // Extract jobLink
+        let jobLink: string | null = null;
+        if (columnMapping?.jobLink) {
+          jobLink = notionData[columnMapping.jobLink] || null;
+        }
+
+        // Use the actual "Sl No." value as notionRowOrder — the user controls this
+        // field in Notion to set the exact import order. Falls back to the
+        // sequential API position (currentNotionIndex) when the field is absent.
+        const slNoRaw = notionData["Sl No."];
+        const slNoValue = (slNoRaw !== null && slNoRaw !== undefined) ? Number(slNoRaw) : null;
+        const resolvedRowOrder = slNoValue !== null && !Number.isNaN(slNoValue)
+          ? slNoValue
+          : currentNotionIndex;
+
+        // Store complete Notion row — notionRowOrder = Sl No. value (or API position fallback)
         const newContact = await storage.createContact(userId, {
           name: contactName,
-          email: email, // Validated as not null above
+          email: email,
           company: company,
           role: role,
-          status: status || "not-sent", // Default to 'not-sent' if no status found (per spec "not applied" -> First email)
+          status: validatedStatus,
           source: "notion",
           notionPageId: page.id,
-          notionData: notionData, // Complete Notion row (all columns)
-          notionRowOrder: rowNumber, // Preserve original row order
-          notionColumnOrder: columnOrder, // Preserve original column order
-          firstEmailDate: null,
-          followup1Date: null,
-          followup2Date: null,
-          jobLink: null,
+          notionData: notionData,
+          notionRowOrder: resolvedRowOrder,
+          notionColumnOrder: columnOrder,
+          firstEmailDate: firstEmailDate,
+          followup1Date: followup1Date,
+          followup2Date: followup2Date,
+          jobLink: jobLink,
         } as any);
 
-        console.log(`[Notion Import] Row ${rowNumber} - IMPORTED successfully: ${email}`);
+        console.log(`[Notion Import] Row ${rowNumber} (Sl No.=${slNoValue ?? 'missing'}, rowOrder=${resolvedRowOrder}) - IMPORTED: ${email} (status="${validatedStatus}")`);
         imported++;
       } catch (e: any) {
         const errorMsg = `Row ${rowNumber}: Error - ${e.message}`;
@@ -325,26 +417,134 @@ function extractNotionValue(prop: any): string | null {
       value = prop.phone_number || null;
       break;
     case "select":
-      // Store selected option name as plain text
       value = prop.select?.name || null;
       break;
     case "multi_select":
-      // Store multiple options as comma-separated string
       value = prop.multi_select?.map((opt: any) => opt.name).join(", ") || null;
       break;
     case "url":
       value = prop.url || null;
       break;
     case "date":
-      // Extract ISO date string
+      // ISO date string, timezone-safe
       value = prop.date?.start || null;
       break;
+    case "formula":
+      // Formulas can return date, string, number, or boolean
+      if (prop.formula?.type === "date") value = prop.formula.date?.start || null;
+      else if (prop.formula?.type === "string") value = prop.formula.string || null;
+      else if (prop.formula?.type === "number") value = prop.formula.number?.toString() || null;
+      else if (prop.formula?.type === "boolean") value = prop.formula.boolean?.toString() || null;
+      break;
+    case "rollup":
+      // Rollups contain arrays; extract first element
+      if (prop.rollup?.type === "array" && prop.rollup.array?.length > 0) {
+        const first = prop.rollup.array[0];
+        if (first?.type === "date") value = first.date?.start || null;
+        else value = extractNotionValue(first);
+      } else if (prop.rollup?.type === "number") {
+        value = prop.rollup.number?.toString() || null;
+      } else if (prop.rollup?.type === "date") {
+        value = prop.rollup.date?.start || null;
+      }
+      break;
+    case "created_time":
+      // ISO 8601 timestamp with timezone (e.g. "2026-02-18T09:00:00.000Z")
+      value = prop.created_time || null;
+      break;
+    case "last_edited_time":
+      value = prop.last_edited_time || null;
+      break;
+    case "number":
+      value = prop.number != null ? prop.number.toString() : null;
+      break;
+    case "checkbox":
+      value = prop.checkbox != null ? prop.checkbox.toString() : null;
+      break;
+    case "status":
+      // Notion's native Status property type
+      value = prop.status?.name || null;
+      break;
+    case "people":
+      value = prop.people?.map((p: any) => p.name || p.id).join(", ") || null;
+      break;
+    case "files":
+      value = prop.files?.[0]?.file?.url || prop.files?.[0]?.external?.url || null;
+      break;
+    case "relation":
+      value = prop.relation?.map((r: any) => r.id).join(", ") || null;
+      break;
     default:
+      console.warn(`[extractNotionValue] Unhandled property type: "${prop.type}". Returning null.`);
       value = null;
   }
 
-  // Trim and ensure no null/undefined
+  // Trim strings, preserve null
   return value ? value.trim() : null;
+}
+
+/**
+ * Parse a string or Date value into a Date object, timezone-safe.
+ * Returns null if parsing fails. Always stores as UTC.
+ */
+function safeParseDateValue(raw: any): Date | null {
+  if (!raw) return null;
+  if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+  if (typeof raw === "string") {
+    // Handle date-only strings ("2026-02-18") by treating as UTC midnight
+    const dateOnlyMatch = raw.match(/^\d{4}-\d{2}-\d{2}$/);
+    if (dateOnlyMatch) {
+      const d = new Date(raw + "T00:00:00.000Z");
+      return isNaN(d.getTime()) ? null : d;
+    }
+    // Full ISO string — parse directly
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+/**
+ * Fallback: extract a Date directly from a raw Notion property object.
+ * Handles all property types that can contain a date.
+ * Used when extractNotionValue() + notionData lookup both fail.
+ */
+function extractDateFromRawProperty(prop: any): Date | null {
+  if (!prop || !prop.type) return null;
+
+  let isoString: string | null = null;
+
+  switch (prop.type) {
+    case "date":
+      isoString = prop.date?.start || null;
+      break;
+    case "formula":
+      if (prop.formula?.type === "date") isoString = prop.formula.date?.start || null;
+      else if (prop.formula?.type === "string") isoString = prop.formula.string || null;
+      break;
+    case "rollup":
+      if (prop.rollup?.type === "array" && prop.rollup.array?.length > 0) {
+        const first = prop.rollup.array[0];
+        if (first?.type === "date") isoString = first.date?.start || null;
+      } else if (prop.rollup?.type === "date") {
+        isoString = prop.rollup.date?.start || null;
+      }
+      break;
+    case "created_time":
+      isoString = prop.created_time || null;
+      break;
+    case "last_edited_time":
+      isoString = prop.last_edited_time || null;
+      break;
+    case "rich_text":
+      // Sometimes dates stored as text
+      isoString = prop.rich_text?.[0]?.plain_text || null;
+      break;
+    default:
+      return null;
+  }
+
+  return safeParseDateValue(isoString);
 }
 
 function mapNotionStatusToInternal(notionStatus: string): string {
@@ -381,37 +581,85 @@ function extractNotionProperty(data: Record<string, any>, candidates: string[]):
 export async function syncContactStatusToNotion(
   userId: string,
   contactId: string,
-  status: string
+  status: string,
+  dates: {
+    firstEmailDate?: Date | null;
+    followup1Date?: Date | null;
+    followup2Date?: Date | null;
+  } = {}
 ): Promise<void> {
   const contact = await storage.getContact(contactId, userId);
-  if (!contact || !contact.notionPageId) return;
-
-  try {
-    const notion = await getNotionClient(userId);
-
-    await notion.pages.update({
-      page_id: contact.notionPageId,
-      properties: {
-        Status: {
-          select: { name: statusToNotionLabel(status) },
-        },
-      },
-    });
-  } catch (e: any) {
-    console.error(`Failed to sync status to Notion for contact ${contactId}:`, e.message);
+  if (!contact || !contact.notionPageId) {
+    console.log(`[Notion Sync] Skipping — contact ${contactId} has no Notion page ID`);
+    return;
   }
+
+  const notion = await getNotionClient(userId);
+
+  // Build properties patch — only include fields that have values
+  const properties: Record<string, any> = {
+    Status: { select: { name: statusToNotionLabel(status) } },
+  };
+
+  // ─── UTC-SAFE TIMESTAMP FORMATTING (NOTION DISPLAY) ──────────────────────
+  // Sends full ISO-8601 UTC timestamp (not date-only) so Notion shows date + time.
+  // Note: user must enable "Include time" in Notion column settings for time to display.
+  //
+  // Why the "Z" append: timestamp without time zone columns return strings without
+  // a timezone marker (e.g. "2026-02-15T00:30:00"). JS Date() treats a Z-less
+  // string as local time (IST = UTC+5:30), shifting the date backward by 5.5h.
+  // Appending "Z" forces UTC interpretation, preventing Feb-15 → Feb-14 rollback.
+  const asUTCTimestamp = (d: Date | string | null | undefined): string => {
+    if (!d) return "";
+    const raw = d instanceof Date ? d.toISOString() : String(d);
+    // If it already has a timezone marker (Z or +xx:xx), use as-is; otherwise force UTC.
+    const utcStr = /[Zz]|[+-]\d{2}:\d{2}$/.test(raw) ? raw : raw + "Z";
+    return new Date(utcStr).toISOString(); // Full ISO-8601 UTC — "2026-02-20T08:17:25.000Z"
+  };
+
+  if (dates.firstEmailDate) {
+    properties["First Email Date"] = {
+      date: { start: asUTCTimestamp(dates.firstEmailDate) },
+    };
+  }
+  if (dates.followup1Date) {
+    properties["Follow-up 1 Date"] = {
+      date: { start: asUTCTimestamp(dates.followup1Date) },
+    };
+  }
+  if (dates.followup2Date) {
+    properties["Follow-up 2 Date"] = {
+      date: { start: asUTCTimestamp(dates.followup2Date) },
+    };
+  }
+
+  console.log(`[Notion Sync] Patching page ${contact.notionPageId}`, {
+    status: statusToNotionLabel(status),
+    properties: JSON.stringify(properties),
+  });
+
+  // Throws on failure — caller (tryNotionSync) handles and logs the error
+  await notion.pages.update({
+    page_id: contact.notionPageId,
+    properties,
+  });
+
+  console.log(`[Notion Sync] Page ${contact.notionPageId} updated successfully`);
 }
 
 function statusToNotionLabel(status: string): string {
   const map: Record<string, string> = {
     "not-sent": "Not Applied",
-    sent: "First Email Sent",
+    "sent": "First Email Sent",
     "followup-1": "Follow-Up 1",
     "followup-2": "Follow-Up 2",
-    followup: "Follow-Up",
-    replied: "Replied",
-    bounced: "Bounced",
-    paused: "Paused",
+    "followup": "Follow-Up",
+    "replied": "Replied",
+    "bounced": "Bounced",
+    "paused": "Paused",
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "manual_break": "Manual Break",
   };
   return map[status] || status;
 }

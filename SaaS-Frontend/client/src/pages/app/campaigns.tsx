@@ -14,11 +14,14 @@ import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import { useTimezone } from "@/hooks/use-timezone";
+import { formatStartTime } from "@/lib/date-utils";
 
 interface CampaignSettings {
   dailyLimit: number;
   followups: number;
   delays: number[];
+  autoRejectAfterDays: number | null;
   priority: "followups" | "fresh" | "balanced" | "all";
   balanced: number;
   automationStatus?: string;
@@ -49,6 +52,7 @@ export default function CampaignSettingsPage() {
   const [dailyLimit, setDailyLimit] = useState(80);
   const [followups, setFollowups] = useState(2);
   const [delays, setDelays] = useState<number[]>([2, 4]);
+  const [autoRejectAfterDays, setAutoRejectAfterDays] = useState<string>("7");
   const [priority, setPriority] = useState<"followups" | "fresh" | "balanced" | "all">("balanced");
   const [balanced, setBalanced] = useState(60);
   const [startTime, setStartTime] = useState("09:00");
@@ -66,6 +70,7 @@ export default function CampaignSettingsPage() {
       setDailyLimit(data.dailyLimit ?? 80);
       setFollowups(data.followups ?? 2);
       setDelays(data.delays ?? [2, 4]);
+      setAutoRejectAfterDays(data.autoRejectAfterDays === null ? "" : String(data.autoRejectAfterDays ?? 7));
       setPriority(data.priority ?? "balanced");
       setBalanced(data.balanced ?? 60);
       setStartTime(data.startTime ?? "09:00");
@@ -74,8 +79,10 @@ export default function CampaignSettingsPage() {
   }, [data]);
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      apiPut("/api/campaign-settings", { dailyLimit, followups, delays, priority, balanced, startTime, timezone }),
+    mutationFn: () => {
+      const parsedDays = autoRejectAfterDays.trim() === "" ? null : Number(autoRejectAfterDays);
+      return apiPut("/api/campaign-settings", { dailyLimit, followups, delays, autoRejectAfterDays: parsedDays, priority, balanced, startTime, timezone });
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/campaign-settings"] });
       toast({ title: "Saved", description: "Campaign settings saved." });
@@ -241,6 +248,24 @@ export default function CampaignSettingsPage() {
               ) : null}
             </div>
 
+            <div className="grid gap-2">
+              <Label htmlFor="auto-reject" data-testid="label-auto-reject">
+                Auto-rejection delay (days)
+              </Label>
+              <Input
+                id="auto-reject"
+                type="number"
+                min={0}
+                value={autoRejectAfterDays}
+                onChange={(e) => setAutoRejectAfterDays(e.target.value)}
+                placeholder="e.g. 7"
+                data-testid="input-auto-reject"
+              />
+              <div className="text-xs text-muted-foreground" data-testid="help-auto-reject">
+                Days after final follow-up before marking as rejected. Leave blank to never auto-reject.
+              </div>
+            </div>
+
             <div className="grid gap-3">
               <div className="text-sm font-semibold" data-testid="text-priority-title">Priority mode</div>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -312,7 +337,7 @@ export default function CampaignSettingsPage() {
             <div className="text-sm font-semibold" data-testid="text-automation-title">Automation Control</div>
             <div className="mt-3 text-sm text-muted-foreground">
               {automationStatus === "running"
-                ? `Automation is active. Sends start at ${startTime} daily.`
+                ? `Automation is active. Sends start at ${formatStartTime(startTime)} daily.`
                 : "Start automation to begin sending emails automatically."}
             </div>
             <div className="mt-4 flex gap-2">
@@ -352,13 +377,19 @@ export default function CampaignSettingsPage() {
                 <div className="text-muted-foreground">Follow-ups</div>
                 <div className="font-medium" data-testid="text-summary-followups">{followups}</div>
               </div>
+              <div className="flex items-center justify-between" data-testid="row-summary-auto-reject">
+                <div className="text-muted-foreground">Auto-reject after</div>
+                <div className="font-medium" data-testid="text-summary-auto-reject">
+                  {autoRejectAfterDays.trim() === "" ? "Never" : `${autoRejectAfterDays}d`}
+                </div>
+              </div>
               <div className="flex items-center justify-between" data-testid="row-summary-priority">
                 <div className="text-muted-foreground">Priority</div>
                 <div className="font-medium" data-testid="text-summary-priority">{priority}</div>
               </div>
               <div className="flex items-center justify-between" data-testid="row-summary-start-time">
                 <div className="text-muted-foreground">Start time</div>
-                <div className="font-medium" data-testid="text-summary-start-time">{startTime}</div>
+                <div className="font-medium" data-testid="text-summary-start-time">{formatStartTime(startTime)}</div>
               </div>
               <div className="flex items-center justify-between" data-testid="row-summary-timezone">
                 <div className="text-muted-foreground">Timezone</div>

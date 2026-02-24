@@ -71,6 +71,7 @@ export interface IStorage {
   createContact(userId: string, data: InsertContact): Promise<Contact>;
   updateContact(id: string, userId: string, data: Partial<InsertContact>): Promise<Contact | undefined>;
   deleteContact(id: string, userId: string): Promise<boolean>;
+  clearAllContacts(userId: string): Promise<number>;
 
   getCampaignSettings(userId: string): Promise<CampaignSettings | undefined>;
   upsertCampaignSettings(userId: string, data: InsertCampaignSettings): Promise<CampaignSettings>;
@@ -321,10 +322,12 @@ export class DatabaseStorage implements IStorage {
       .from("contacts")
       .select("*")
       .eq("user_id", userId)
-      .order("notion_row_order", { ascending: true, nullsFirst: false })
-      .order("created_at", { ascending: false });
+      // notion_row_order is the sole sort key — preserves exact Notion row order.
+      // nullsFirst: false puts manually-added contacts (no notion_row_order) at the end.
+      .order("notion_row_order", { ascending: true, nullsFirst: false });
     return data ? rowsToCamel<Contact>(data) : [];
   }
+
 
   async getContact(id: string, userId: string): Promise<Contact | undefined> {
     const { data } = await supabaseAdmin
@@ -377,6 +380,20 @@ export class DatabaseStorage implements IStorage {
     return !error && (count ?? 0) > 0;
   }
 
+  /**
+   * Hard-delete ALL contacts for a user from the local database.
+   * This is a local purge only — Notion is never called or modified.
+   * Returns the number of rows deleted.
+   */
+  async clearAllContacts(userId: string): Promise<number> {
+    const { error, count } = await supabaseAdmin
+      .from("contacts")
+      .delete({ count: "exact" })
+      .eq("user_id", userId);
+    if (error) throw new Error(`Failed to clear contacts: ${error.message}`);
+    return count ?? 0;
+  }
+
   // ─── Campaign Settings ─────────────────────────────────────
 
   async getCampaignSettings(userId: string): Promise<CampaignSettings | undefined> {
@@ -408,6 +425,8 @@ export class DatabaseStorage implements IStorage {
     if (error) throw error;
     return keysToCamel<CampaignSettings>(data);
   }
+
+
 
   // ─── Email Sends ───────────────────────────────────────────
 

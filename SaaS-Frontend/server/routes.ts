@@ -18,7 +18,7 @@ import {
 import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./services/gmail";
 import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
-import { startAutomationScheduler, stopAutomationScheduler } from "./services/automation";
+import { startAutomationScheduler, stopAutomationScheduler, repairContactDates, isAutomationRunning, runAutomationCycle } from "./services/automation";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 import { campaignSettings } from "@shared/schema";
@@ -289,6 +289,7 @@ export async function registerRoutes(
             description: profile.profileDescription || "",
             customPrompt: profile.customPrompt || "",
             resumeUrl: profile.resumeUrl || null,
+            resumeOriginalName: profile.resumeOriginalName || null,
           }
           : null,
         experiences: exps,
@@ -336,6 +337,7 @@ export async function registerRoutes(
         description: profile.profileDescription || "",
         customPrompt: profile.customPrompt || "",
         resumeUrl: profile.resumeUrl || null,
+        resumeOriginalName: profile.resumeOriginalName || null,
         experiences: updatedExperiences,
         projects: updatedProjects,
       });
@@ -393,7 +395,8 @@ export async function registerRoutes(
 
       // 4. Update Profile with URL
       await storage.upsertUserProfile(userId, {
-        resumeUrl: publicUrl
+        resumeUrl: publicUrl,
+        resumeOriginalName: file.originalname,
       });
 
       res.json({
@@ -402,6 +405,40 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("Resume upload error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
+  app.delete("/api/profile/resume", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const userProfile = await storage.getUserProfile(userId);
+
+      if (userProfile?.resumeUrl) {
+        // Attempt to extract the path for deletion
+        // Public URL format ends with .../resumes/USER_ID/FILENAME
+        const urlParts = userProfile.resumeUrl.split("/resumes/");
+        if (urlParts.length > 1) {
+          const filePath = urlParts[1];
+          // Delete from storage
+          const { error: deleteError } = await supabaseAdmin.storage
+            .from("resumes")
+            .remove([filePath]);
+
+          if (deleteError) {
+            console.warn("Storage delete error (non-blocking):", deleteError);
+          }
+        }
+      }
+
+      await storage.upsertUserProfile(userId, {
+        resumeUrl: null,
+        resumeOriginalName: null,
+      });
+
+      res.json({ message: "Resume removed" });
+    } catch (error: any) {
+      console.error("Resume remove error:", error);
       res.status(500).json({ message: "Internal server error" });
     }
   });
@@ -510,10 +547,60 @@ export async function registerRoutes(
     }
   });
 
+  // ─── Clear All Contacts (local DB only — Notion is never touched) ─────
+  // IMPORTANT: This route MUST be registered before /api/contacts/:id
+  // so Express does not match "clear" as a contact ID param.
+  app.delete("/api/contacts/clear", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+
+      // Safety: check the DB automationStatus for THIS user.
+      // The DB is the single source of truth — if the user paused automation
+      // in the UI, the DB reflects that immediately.
+      // We do NOT use the in-memory sendCycleRunning flag because it is
+      // shared across all users and can be briefly true during a 5-min cron tick.
+      const settings = await storage.getCampaignSettings(userId);
+      if (settings?.automationStatus === "running") {
+        return res.status(409).json({
+          message:
+            "Automation is currently running. Please pause it before clearing contacts.",
+        });
+      }
+
+      // Hard-delete all contacts for this user from local DB only.
+      // This does NOT call Notion, archive Notion pages, or modify Notion in any way.
+      const deleted = await storage.clearAllContacts(userId);
+
+      res.json({ deleted, message: "All contacts cleared from application." });
+    } catch (error: any) {
+      console.error("[contacts/clear] Error:", error);
+      res.status(500).json({ message: error.message || "Internal server error" });
+    }
+  });
+
   app.put("/api/contacts/:id", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const contact = await storage.updateContact(req.params.id as string, userId, req.body);
+
+      // ─── STRICT: Strip all automation-managed fields ──────────────────────────
+      // These fields are ONLY written by the automation state machine.
+      // A user-facing PUT must NEVER overwrite status, date timestamps, or
+      // Notion metadata — doing so would corrupt the state machine invariants.
+      const {
+        status,
+        firstEmailDate,
+        followup1Date,
+        followup2Date,
+        lastSentAt,
+        notionPageId,
+        createdAt,
+        updatedAt,
+        id,
+        userId: _uid,
+        ...userEditableFields
+      } = req.body;
+
+      const contact = await storage.updateContact(req.params.id as string, userId, userEditableFields);
       if (!contact) return res.status(404).json({ message: "Not found" });
       res.json(contact);
     } catch (error: any) {
@@ -654,10 +741,15 @@ export async function registerRoutes(
       if (!settings) {
         settings = await storage.upsertCampaignSettings(userId, {});
       }
+      // autoRejectAfterDays is encoded as followupDelays[2] (no extra DB column needed)
+      const rawDelays: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];
+      const clientDelays = rawDelays.slice(0, 2);
+      const autoRejectAfterDays = rawDelays[2] !== undefined ? rawDelays[2] : 7;
       res.json({
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
-        delays: settings.followupDelays,
+        delays: clientDelays,
+        autoRejectAfterDays,
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
@@ -673,20 +765,27 @@ export async function registerRoutes(
   app.put("/api/campaign-settings", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const { dailyLimit, followups, delays, priority, balanced, startTime, timezone } = req.body;
+      const { dailyLimit, followups, delays, priority, balanced, startTime, timezone, autoRejectAfterDays } = req.body;
+      // Pack autoRejectAfterDays as delays[2] so it persists in the existing followup_delays column.
+      const packedDelays: number[] = Array.isArray(delays) ? [...delays] : [];
+      const rejection = autoRejectAfterDays !== undefined ? Number(autoRejectAfterDays) : 7;
+      packedDelays[2] = rejection; // slot 2 is our autoRejectAfterDays store
       const settings = await storage.upsertCampaignSettings(userId, {
         dailyLimit: dailyLimit ?? undefined,
         followupCount: followups ?? undefined,
-        followupDelays: delays ?? undefined,
+        followupDelays: packedDelays,
         priorityMode: priority ?? undefined,
         balancedRatio: balanced ?? undefined,
         startTime: startTime ?? undefined,
         timezone: timezone ?? undefined,
       });
+      // Decode for response
+      const savedDelays: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];
       res.json({
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
-        delays: settings.followupDelays,
+        delays: savedDelays.slice(0, 2),
+        autoRejectAfterDays: savedDelays[2] !== undefined ? savedDelays[2] : 7,
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
@@ -724,6 +823,14 @@ export async function registerRoutes(
         priority: settings.priorityMode,
         balanced: settings.balancedRatio,
         automationStatus: settings.automationStatus,
+      });
+
+      // Kick off a cycle immediately — don't make the user wait up to 5 min for cron.
+      // Fire-and-forget; errors are caught inside runAutomationCycle.
+      setImmediate(() => {
+        runAutomationCycle().catch((err: any) =>
+          console.error("[Automation] Immediate start cycle error:", err.message)
+        );
       });
     } catch (error: any) {
       console.error("Start automation error:", error);
@@ -780,7 +887,94 @@ export async function registerRoutes(
   });
 
 
+  // ─── AUTOMATION DEBUG ENDPOINT ─────────────────────────────────────────────
+  // Returns full diagnostic state: settings, Gmail, contacts, cycle result.
+  app.get("/api/automation/debug-run", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const settings = await storage.getCampaignSettings(userId);
+      const gmailIntegration = await storage.getIntegration(userId, "gmail");
+      const contacts = await storage.getContacts(userId);
+      const today = new Date().toISOString().split("T")[0];
+      const usage = await storage.getDailyUsage(userId, today);
+
+      // Run startTime check manually
+      let isAfterStart = true;
+      let startCheckDetail = "";
+      if (settings) {
+        const startTime = settings.startTime || "09:00";
+        const tz = settings.timezone || "America/New_York";
+        try {
+          const now = new Date();
+          const formatter = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false });
+          const parts = formatter.formatToParts(now);
+          const currentHour = parseInt(parts.find((p) => p.type === "hour")?.value || "0", 10);
+          const currentMinute = parseInt(parts.find((p) => p.type === "minute")?.value || "0", 10);
+          const [startHour, startMinute] = startTime.split(":").map(Number);
+          const currentMins = currentHour * 60 + currentMinute;
+          const startMins = startHour * 60 + startMinute;
+          isAfterStart = currentMins >= startMins;
+          startCheckDetail = `currentTime=${currentHour}:${String(currentMinute).padStart(2, "0")} (${tz}), startTime=${startTime}, currentMins=${currentMins}, startMins=${startMins}`;
+        } catch (e: any) { startCheckDetail = `ERROR: ${e.message}`; }
+      }
+
+      const diag = {
+        userId,
+        serverTime: new Date().toISOString(),
+        settings: settings ? {
+          automationStatus: settings.automationStatus,
+          startTime: settings.startTime,
+          timezone: settings.timezone,
+          dailyLimit: settings.dailyLimit,
+          followupCount: settings.followupCount,
+          followupDelays: settings.followupDelays,
+        } : null,
+        isAfterStartTime: isAfterStart,
+        startTimeCheck: startCheckDetail,
+        gmail: { connected: gmailIntegration?.connected ?? false },
+        dailyUsage: { today, sentToday: usage?.emailsSent ?? 0, limit: settings?.dailyLimit ?? 80 },
+        contacts: contacts.map(c => ({ id: c.id, email: c.email, status: c.status, firstEmailDate: c.firstEmailDate })),
+        contactCount: contacts.length,
+        contactStatusBreakdown: contacts.reduce((acc: Record<string, number>, c) => {
+          const s = c.status || "null";
+          acc[s] = (acc[s] || 0) + 1;
+          return acc;
+        }, {}),
+      };
+
+      // Now actually run the cycle
+      let cycleError: string | null = null;
+      try {
+        await runAutomationCycle();
+      } catch (e: any) { cycleError = e.message; }
+
+      res.json({ diag, cycleError, message: "Cycle triggered. Check server terminal for [AUTOMATION DEBUG] logs." });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── DATA REPAIR ENDPOINT ──────────────────────────────────────────────────
+  // Fixes corrupted contacts from Notion imports where status is set but dates are NULL.
+  // Call this once to repair existing data inconsistencies.
+  app.post("/api/automation/repair-dates", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      console.log(`[Data Repair] Starting repair for user: ${userId}`);
+      const result = await repairContactDates(userId);
+      res.json({
+        message: `Repaired ${result.repaired} contacts`,
+        repaired: result.repaired,
+        details: result.details,
+      });
+    } catch (error: any) {
+      console.error("Repair dates error:", error);
+      res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/api/dashboard", requireAuth, async (req, res) => {
+
     try {
       const userId = getUserId(req);
       const [stats, activity, settings] = await Promise.all([
@@ -1229,6 +1423,7 @@ export async function registerRoutes(
             role: contact.role,
             status: displayStatus, // Notion value or DB value
             source: contact.source,
+            notionRowOrder: (contact as any).notionRowOrder ?? null, // Sl No. value — used for sort
             lastMessage: latestSend
               ? {
                 subject: latestSend.subject,
@@ -1245,13 +1440,20 @@ export async function registerRoutes(
 
           return threadObj;
         })
+        // Sort by Sl No. (notionRowOrder) ASC — exact Notion-controlled order.
+        // Contacts without a Sl No. (manually added) are placed last.
         .sort((a, b) => {
-          if (a.unread && !b.unread) return -1;
-          if (!a.unread && b.unread) return 1;
-          const aTime = a.lastMessage?.sentAt ? new Date(a.lastMessage.sentAt).getTime() : 0;
-          const bTime = b.lastMessage?.sentAt ? new Date(b.lastMessage.sentAt).getTime() : 0;
-          return bTime - aTime;
+          const aOrder = a.notionRowOrder;
+          const bOrder = b.notionRowOrder;
+          if (aOrder === null && bOrder === null) return 0;
+          if (aOrder === null) return 1;   // nulls last
+          if (bOrder === null) return -1;  // nulls last
+          return aOrder - bOrder;
         });
+
+      // Log sorted order for verification — visible in server terminal
+      console.log(`[Inbox] ${threads.length} threads ordered by Sl No.:`,
+        threads.map(t => `${t.notionRowOrder ?? 'manual'}→${t.email}`).join(', '));
 
       res.json(threads);
     } catch (error: any) {
@@ -1297,7 +1499,7 @@ export async function registerRoutes(
           detailDisplayStatus = detailNotionData[statusKey];
         }
       }
-      
+
       res.json({
         contact: {
           id: contact.id,

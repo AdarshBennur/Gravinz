@@ -5,13 +5,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
 import { queryClient } from "./lib/queryClient";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { TimezoneProvider } from "@/hooks/use-timezone";
 
 import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/auth/login";
 import SignupPage from "@/pages/auth/signup";
 import ForgotPasswordPage from "@/pages/auth/forgot";
 import DashboardPage from "@/pages/app/dashboard";
-import ContactsPage from "@/pages/app/contacts";
 import CampaignSettingsPage from "@/pages/app/campaigns";
 import AnalyticsPage from "./pages/app/analytics";
 import IntegrationsPage from "@/pages/app/integrations";
@@ -51,7 +51,6 @@ function Router() {
 
       <Route path="/app" component={() => <Redirect to="/app/dashboard" />} />
       <Route path="/app/dashboard" component={() => <ProtectedRoute component={DashboardPage} />} />
-      <Route path="/app/contacts" component={() => <ProtectedRoute component={ContactsPage} />} />
       <Route path="/app/campaigns" component={() => <ProtectedRoute component={CampaignSettingsPage} />} />
       <Route path="/app/inbox" component={() => <ProtectedRoute component={InboxPage} />} />
       <Route path="/app/analytics" component={() => <ProtectedRoute component={AnalyticsPage} />} />
@@ -70,10 +69,12 @@ export default function App() {
       <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
         <TooltipProvider>
           <AuthProvider>
-            <Toaster />
-            <div className="min-h-dvh app-bg transition-colors duration-500">
-              <Router />
-            </div>
+            <TimezoneProvider>
+              <Toaster />
+              <div className="min-h-dvh app-bg transition-colors duration-500">
+                <Router />
+              </div>
+            </TimezoneProvider>
           </AuthProvider>
         </TooltipProvider>
       </ThemeProvider>

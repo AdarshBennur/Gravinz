@@ -60,6 +60,12 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // ── Startup migrations (idempotent) ──────────────────────────────────────
+  // Note: Migration for resume_original_name must be run manually via Supabase SQL Editor
+  // because direct TCP connection (required for DDL) is blocked in this environment.
+  // SQL: ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS resume_original_name TEXT;
+
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
