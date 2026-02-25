@@ -15,6 +15,7 @@ import {
   Circle,
   ChevronRight,
   Trash2,
+  RotateCcw,
 } from "lucide-react";
 
 import AppShell from "@/components/app/app-shell";
@@ -35,7 +36,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 
-import { apiGet, apiRequest } from "@/lib/api";
+import { apiGet, apiPost, apiRequest } from "@/lib/api";
 import { useTimezone } from "@/hooks/use-timezone";
 import { formatThreadTime, formatFullDate } from "@/lib/date-utils";
 
@@ -205,6 +206,24 @@ export default function InboxPage() {
     },
   });
 
+  // Notion sync — reuses the same endpoint as the Integrations page.
+  // No backend changes; this is pure UI-level reuse.
+  const syncFromNotion = useMutation({
+    mutationFn: () => apiPost<any>("/api/integrations/notion/sync", {}),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/inbox/threads"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
+      toast({
+        title: "Notion Sync Complete",
+        description: `Synced ${result.imported ?? 0} contacts${
+          result.skipped ? `, ${result.skipped} skipped` : ""
+        }`,
+      });
+    },
+    onError: (err: Error) =>
+      toast({ title: "Sync Error", description: err.message, variant: "destructive" }),
+  });
+
   return (
     <>
       <AlertDialog open={showClearModal} onOpenChange={setShowClearModal}>
@@ -244,16 +263,34 @@ export default function InboxPage() {
                   className="pl-9 h-9"
                 />
               </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                className="w-full h-8 text-xs"
-                onClick={() => setShowClearModal(true)}
-                data-testid="button-clear-contacts"
-              >
-                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
-                Clear Imported Contacts
-              </Button>
+              <div className="flex gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 h-8 text-xs"
+                  onClick={() => syncFromNotion.mutate()}
+                  disabled={syncFromNotion.isPending}
+                  title="Sync latest changes from Notion"
+                  data-testid="button-sync-notion-inbox"
+                >
+                  <RotateCcw
+                    className={`mr-1.5 h-3.5 w-3.5 ${
+                      syncFromNotion.isPending ? "animate-spin" : ""
+                    }`}
+                  />
+                  {syncFromNotion.isPending ? "Syncing..." : "Sync Notion"}
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="flex-1 h-8 text-xs"
+                  onClick={() => setShowClearModal(true)}
+                  data-testid="button-clear-contacts"
+                >
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  Clear
+                </Button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto min-h-0">
