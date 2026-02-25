@@ -26,9 +26,20 @@ function AnimatedNumber({ value }: { value: number }) {
   return <motion.span data-testid="text-animated-number">{rounded}</motion.span>;
 }
 
+// Normalise a DB timestamp string to explicit UTC.
+// Postgres TIMESTAMP WITHOUT TIME ZONE returns strings like
+// "2026-02-25T10:35:13.75" (no Z). The Date constructor treats
+// those as LOCAL time — causing wrong diffs in IST or any non-UTC zone.
+// Appending Z forces UTC interpretation. Strings already tagged (Z / ±HH:MM) are left alone.
+function normalizeUTC(s: string): string {
+  if (/[Zz]$/.test(s) || /[+-]\d{2}:\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s + "Z";
+  return s;
+}
+
 function relativeTime(dateStr: string): string {
   const now = Date.now();
-  const then = new Date(dateStr).getTime();
+  const then = new Date(normalizeUTC(dateStr)).getTime();
   const diffMs = now - then;
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return "now";
@@ -187,12 +198,12 @@ export default function DashboardPage() {
               <TableBody>
                 {loading
                   ? Array.from({ length: 4 }).map((_, i) => (
-                      <TableRow key={i} data-testid={`row-activity-skeleton-${i}`}>
-                        <TableCell colSpan={3}>
-                          <Skeleton className="h-5 w-full" />
-                        </TableCell>
-                      </TableRow>
-                    ))
+                    <TableRow key={i} data-testid={`row-activity-skeleton-${i}`}>
+                      <TableCell colSpan={3}>
+                        <Skeleton className="h-5 w-full" />
+                      </TableCell>
+                    </TableRow>
+                  ))
                   : activity.length === 0
                     ? (
                       <TableRow>
