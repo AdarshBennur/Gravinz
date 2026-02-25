@@ -96,7 +96,7 @@ export default function CampaignSettingsPage() {
     mutationFn: () => apiPost("/api/automation/start"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/campaign-settings"] });
-      toast({ title: "Automation started", description: `Emails will begin sending at ${startTime}.` });
+      toast({ title: "Automation started", description: `Emails will begin sending at ${formatStartTime(startTime)}.` });
     },
     onError: (err: Error) => toast({ title: "Error", description: err.message }),
   });
