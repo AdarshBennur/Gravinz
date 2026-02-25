@@ -121,7 +121,8 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     6. **Follow-ups**: If this is a follow-up, acknowledge previous silence politely but pivot to a new value add. Do NOT just say "checking in".
     7. **Resume**: ${resumeUrl ? "You MUST mention that you have attached your resume." : "Do not mention a resume integration logic error."}
     8. **Formatting**: Return JSON with "reasoning", "subject", and "body".
-    9. **Structure**: Body must be PLAIN TEXT only. Use \n\n for paragraph breaks. Use \n for single line breaks. Do NOT use any HTML tags (<p>, <br>, <b>, etc.). No markup whatsoever.
+    9. **Structure**: Body must be PLAIN TEXT only. Use \n\n for paragraph breaks. Do NOT use any HTML tags. No markup whatsoever.
+    10. **NO CLOSING**: Do NOT write any closing phrase or sign-off. Do NOT write "Best", "Best regards", "Thanks", "Sincerely", "Cheers", or the sender's name. The system appends the signature automatically. Stop the body at the last content sentence.
 
     ## Input Data
     ${profileContext}
@@ -154,19 +155,31 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
       .replace(/<br\s*\/?>/gi, "\n")   // replace <br> with newline
       .replace(/<[^>]+>/g, "")         // strip any remaining tags
       .replace(/\n{3,}/g, "\n\n")      // collapse 3+ newlines to double
-      // Paragraph collapse: AI hard-wraps at ~65 chars with \n.
-      // In text/plain those become visible line breaks. Fix: treat
-      // each paragraph as one continuous line — only \n\n is a break.
+      // Paragraph collapse: join intra-paragraph \n with space.
       .split("\n\n")
       .map((para: string) => para.replace(/\n/g, " ").replace(/  +/g, " ").trim())
       .join("\n\n")
+      // Strip any AI-generated closing lines the model emitted despite instructions.
+      // Matches lines like "Best," / "Best regards," / "Thanks," / "Sincerely,"
+      // and the name line that follows, anywhere near the end of the body.
+      .replace(/\n\n(Best\b[^\n]*|Thanks\b[^\n]*|Sincerely\b[^\n]*|Cheers\b[^\n]*|Warm regards\b[^\n]*|Kind regards\b[^\n]*)\n[^\n]*/gi, "")
+      .replace(/\n\n(Best\b[^\n]*|Thanks\b[^\n]*|Sincerely\b[^\n]*|Cheers\b[^\n]*|Warm regards\b[^\n]*|Kind regards\b[^\n]*)/gi, "")
       .trim();
+
+    // Retrieve sender's full name for the hard-coded signature.
+    // Falls back to username then "Adarsh" — never left blank.
+    const senderUser = await storage.getUser(userId);
+    const senderName = senderUser?.fullName?.trim() || senderUser?.username?.trim() || "Adarsh";
+
+    // Hard-append deterministic signature — AI must never control this.
+    // Format: two blank lines → closing phrase → newline → name.
+    const bodyWithSignature = `${cleanBody}\n\nBest regards,\n${senderName}`;
 
     console.log(`[AI Reasoned]: ${parsed.reasoning}`);
 
     return {
       subject: parsed.subject,
-      body: cleanBody,
+      body: bodyWithSignature,
       fallback: false,
     };
 
@@ -188,11 +201,11 @@ function generateFallbackEmail(input: EmailGenerationInput, profileContext: stri
     const followupTemplates = [
       {
         subject: `Re: Quick question about ${contactRole || "the role"} at ${contactCompany || "your company"}`,
-        body: `Hi ${contactName || "there"},\n\nJust wanted to follow up on my previous email. I understand you're busy, but I'd love the chance to share how my experience in ${skills[0] || "this field"} could contribute to your team.\n\nWould a brief 10-minute call work this week?\n\nBest,\n${name}`,
+        body: `Hi ${contactName || "there"},\n\nJust wanted to follow up on my previous email. I understand you're busy, but I'd love the chance to share how my experience in ${skills[0] || "this field"} could contribute to your team.\n\nWould a brief 10-minute call work this week?`,
       },
       {
         subject: `Re: Following up - ${contactCompany || "opportunity"}`,
-        body: `Hi ${contactName || "there"},\n\nCircling back on my earlier note. I've been following ${contactCompany || "your company"}'s recent work and am genuinely excited about the direction you're heading.\n\nI'd appreciate even a brief response — happy to share more about my background if helpful.\n\nThanks,\n${name}`,
+        body: `Hi ${contactName || "there"},\n\nCircling back on my earlier note. I've been following ${contactCompany || "your company"}'s recent work and am genuinely excited about the direction you're heading.\n\nI'd appreciate even a brief response — happy to share more about my background if helpful.`,
       },
     ];
     const template = followupTemplates[((followupNumber || 1) - 1) % followupTemplates.length];
@@ -200,7 +213,7 @@ function generateFallbackEmail(input: EmailGenerationInput, profileContext: stri
   }
 
   const subject = `Quick question about ${contactRole || "the role"} at ${contactCompany || "your company"}`;
-  const body = `Hi ${contactName || "there"},\n\nI came across your profile and was impressed by ${contactCompany || "your company"}'s work. I'm a ${skills[0] || "software"} professional with experience in ${skills.slice(0, 3).join(", ") || "technology"}.\n\nWould you be open to a quick chat about opportunities on your team?\n\nBest,\n${name}`;
+  const body = `Hi ${contactName || "there"},\n\nI came across your profile and was impressed by ${contactCompany || "your company"}'s work. I'm a ${skills[0] || "software"} professional with experience in ${skills.slice(0, 3).join(", ") || "technology"}.\n\nWould you be open to a quick chat about opportunities on your team?`;
 
   return { subject, body, fallback: true };
 }
