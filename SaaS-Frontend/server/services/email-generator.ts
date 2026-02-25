@@ -154,6 +154,12 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
       .replace(/<br\s*\/?>/gi, "\n")   // replace <br> with newline
       .replace(/<[^>]+>/g, "")         // strip any remaining tags
       .replace(/\n{3,}/g, "\n\n")      // collapse 3+ newlines to double
+      // Paragraph collapse: AI hard-wraps at ~65 chars with \n.
+      // In text/plain those become visible line breaks. Fix: treat
+      // each paragraph as one continuous line — only \n\n is a break.
+      .split("\n\n")
+      .map((para: string) => para.replace(/\n/g, " ").replace(/  +/g, " ").trim())
+      .join("\n\n")
       .trim();
 
     console.log(`[AI Reasoned]: ${parsed.reasoning}`);

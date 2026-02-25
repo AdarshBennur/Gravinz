@@ -135,6 +135,11 @@ function createRawEmail(
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
     .replace(/\n{3,}/g, "\n\n")
+    // Paragraph collapse: join any intra-paragraph \n with a space.
+    // This is the final defense — ensures no hard-wraps reach the wire.
+    .split("\n\n")
+    .map((para: string) => para.replace(/\n/g, " ").replace(/  +/g, " ").trim())
+    .join("\n\n")
     .trim();
 
   const hasAttachments = attachments.length > 0;
