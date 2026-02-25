@@ -145,23 +145,48 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
 
     const parsed = JSON.parse(content);
 
-    // Normalize the body: strip surrounding quotes, unescape \n sequences,
-    // and remove any HTML tags the model may have emitted despite instructions.
-    const cleanBody = parsed.body
-      .replace(/^"|"$/g, "")           // strip surrounding quotes
-      .replace(/\\n/g, "\n")           // unescape literal \n sequences
-      .replace(/<p[^>]*>/gi, "")       // strip opening <p> tags
-      .replace(/<\/p>/gi, "\n\n")      // replace closing </p> with double newline
-      .replace(/<br\s*\/?>/gi, "\n")   // replace <br> with newline
-      .replace(/<[^>]+>/g, "")         // strip any remaining tags
-      .replace(/\n{3,}/g, "\n\n")      // collapse 3+ newlines to double
-      // Paragraph collapse: join intra-paragraph \n with space.
+    // ── BULLETPROOF BODY CLEANING ─────────────────────────────────
+    // Using placeholder method: this CANNOT fail regardless of how
+    // the AI formats newlines in its JSON response.
+    //
+    // Step 1: Start with raw body, strip quotes
+    let bodyText = (parsed.body || "").replace(/^"|"$/g, "");
+
+    // Step 2: Normalize ALL line endings first
+    bodyText = bodyText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+    // Step 3: Convert literal \n sequences (backslash + n) to real newlines
+    // OpenAI JSON mode sometimes uses \\n in the JSON string value
+    bodyText = bodyText.replace(/\\n/g, "\n");
+
+    // Step 4: Strip any HTML tags the AI emitted
+    bodyText = bodyText
+      .replace(/<p[^>]*>/gi, "")
+      .replace(/<\/p>/gi, "\n\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, "");
+
+    // Step 5: Collapse 3+ newlines → exactly 2
+    bodyText = bodyText.replace(/\n{3,}/g, "\n\n");
+
+    // Step 6: PLACEHOLDER METHOD — remove ALL single \n inside paragraphs
+    // This is the critical step. Protect paragraph breaks, kill everything else.
+    const PARA_MARKER = "%%PARA_BREAK%%";
+    bodyText = bodyText
+      .replace(/\n\n/g, PARA_MARKER)  // protect paragraph breaks
+      .replace(/\n/g, " ")            // kill ALL remaining single \n
+      .replace(/%%PARA_BREAK%%/g, "\n\n");  // restore paragraph breaks
+
+    // Step 7: Clean up spaces
+    bodyText = bodyText.replace(/ {2,}/g, " ");
+
+    // Step 8: Trim each paragraph
+    const cleanBody = bodyText
       .split("\n\n")
-      .map((para: string) => para.replace(/\n/g, " ").replace(/  +/g, " ").trim())
+      .map((p: string) => p.trim())
+      .filter((p: string) => p.length > 0)
       .join("\n\n")
-      // Strip any AI-generated closing lines the model emitted despite instructions.
-      // Matches lines like "Best," / "Best regards," / "Thanks," / "Sincerely,"
-      // and the name line that follows, anywhere near the end of the body.
+      // Strip any AI-generated closing phrases
       .replace(/\n\n(Best\b[^\n]*|Thanks\b[^\n]*|Sincerely\b[^\n]*|Cheers\b[^\n]*|Warm regards\b[^\n]*|Kind regards\b[^\n]*)\n[^\n]*/gi, "")
       .replace(/\n\n(Best\b[^\n]*|Thanks\b[^\n]*|Sincerely\b[^\n]*|Cheers\b[^\n]*|Warm regards\b[^\n]*|Kind regards\b[^\n]*)/gi, "")
       .trim();
@@ -176,6 +201,9 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     const bodyWithSignature = `${cleanBody}\n\nBest regards,\n${senderName}`;
 
     console.log(`[AI Reasoned]: ${parsed.reasoning}`);
+    // DIAGNOSTIC: show raw vs clean to identify wrapping source
+    console.log(`[RAW AI BODY]:\n${parsed.body}`);
+    console.log(`[CLEAN BODY SENT]:\n${bodyWithSignature}`);
 
     return {
       subject: parsed.subject,
