@@ -121,7 +121,7 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     6. **Follow-ups**: If this is a follow-up, acknowledge previous silence politely but pivot to a new value add. Do NOT just say "checking in".
     7. **Resume**: ${resumeUrl ? "You MUST mention that you have attached your resume." : "Do not mention a resume integration logic error."}
     8. **Formatting**: Return JSON with "reasoning", "subject", and "body".
-    9. **Structure**: Body should be HTML (p, br, b tags only).
+    9. **Structure**: Body must be PLAIN TEXT only. Use \n\n for paragraph breaks. Use \n for single line breaks. Do NOT use any HTML tags (<p>, <br>, <b>, etc.). No markup whatsoever.
 
     ## Input Data
     ${profileContext}
@@ -144,8 +144,17 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
 
     const parsed = JSON.parse(content);
 
-    // Strip quotes if they were added to the body unexpectedly
-    const cleanBody = parsed.body.replace(/^"|"$/g, "").replace(/\\n/g, "\n");
+    // Normalize the body: strip surrounding quotes, unescape \n sequences,
+    // and remove any HTML tags the model may have emitted despite instructions.
+    const cleanBody = parsed.body
+      .replace(/^"|"$/g, "")           // strip surrounding quotes
+      .replace(/\\n/g, "\n")           // unescape literal \n sequences
+      .replace(/<p[^>]*>/gi, "")       // strip opening <p> tags
+      .replace(/<\/p>/gi, "\n\n")      // replace closing </p> with double newline
+      .replace(/<br\s*\/?>/gi, "\n")   // replace <br> with newline
+      .replace(/<[^>]+>/g, "")         // strip any remaining tags
+      .replace(/\n{3,}/g, "\n\n")      // collapse 3+ newlines to double
+      .trim();
 
     console.log(`[AI Reasoned]: ${parsed.reasoning}`);
 
