@@ -16,7 +16,7 @@ import {
   insertUserProfileSchema,
 } from "@shared/schema";
 import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./services/gmail";
-import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
+import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, syncContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
 import { startAutomationScheduler, stopAutomationScheduler, repairContactDates, isAutomationRunning, runAutomationCycle } from "./services/automation";
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -1264,7 +1264,8 @@ export async function registerRoutes(
     }
   });
 
-  // Sync endpoint - re-imports from the stored Notion database
+  // Sync endpoint — full reconciliation: insert new, update existing, DELETE removed.
+  // Only contacts with source='notion' are ever deleted.
   app.post("/api/integrations/notion/sync", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
@@ -1279,15 +1280,16 @@ export async function registerRoutes(
       const databaseId = integration.metadata.databaseId;
       const columnMapping = integration.metadata.columnMapping || undefined;
 
-      console.log(`[Notion Sync] Syncing database ${databaseId} for user ${userId}`);
+      console.log(`[Notion Sync] Reconciliation sync — database ${databaseId}, user ${userId}`);
       if (columnMapping) {
         console.log(`[Notion Sync] Using stored column mapping:`, columnMapping);
       }
 
-      const result = await importContactsFromNotion(userId, databaseId, columnMapping);
+      // syncContactsFromNotion = importContactsFromNotion + deletion of stale rows
+      const result = await syncContactsFromNotion(userId, databaseId, columnMapping);
 
       await storage.createActivityLog(userId, {
-        action: `Synced ${result.imported} contacts from Notion`,
+        action: `Synced ${result.imported} new, ${result.skipped} updated, ${result.deleted} deleted from Notion`,
         status: "system",
       });
 
