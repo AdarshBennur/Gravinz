@@ -398,6 +398,98 @@ export async function importContactsFromNotion(
   return { imported, skipped, errors };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// RECONCILIATION SYNC — mirrors Notion database state exactly.
+// After upserting all current Notion rows, deletes any platform contact
+// with source='notion' whose notionPageId is no longer present in Notion.
+// NEVER deletes manual contacts or contacts from any other source.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function syncContactsFromNotion(
+  userId: string,
+  databaseId: string,
+  columnMapping?: ColumnMapping
+): Promise<{ imported: number; skipped: number; deleted: number; errors: string[] }> {
+
+  // ── STEP 1: Fetch ALL live page IDs from Notion (pagination-aware) ──────
+  const notion = await getNotionClient(userId);
+  const liveNotionPageIds = new Set<string>();
+  let hasMore = true;
+  let startCursor: string | undefined;
+
+  while (hasMore) {
+    // @ts-ignore
+    const response = await notion.databases.query({
+      database_id: databaseId,
+      start_cursor: startCursor,
+      page_size: 100,
+    });
+    for (const page of response.results) {
+      liveNotionPageIds.add((page as any).id);
+    }
+    hasMore = response.has_more;
+    startCursor = response.next_cursor || undefined;
+  }
+
+  console.log(`[Sync] Notion pages: ${liveNotionPageIds.size}`);
+
+  // ── STEP 2: Upsert — insert new + update existing via importContactsFromNotion ─
+  const upsertResult = await importContactsFromNotion(userId, databaseId, columnMapping);
+
+  // ── STEP 3: Fetch all platform contacts with source='notion' ───────────
+  const allContacts = await storage.getContacts(userId);
+  const notionContacts = allContacts.filter(
+    (c: any) => c.source === "notion"
+  );
+
+  console.log(`[Sync] Existing notion contacts in DB: ${notionContacts.length}`);
+
+  // ── STEP 4: Delete contacts whose notionPageId is no longer in Notion ──
+  let deleted = 0;
+  const deleteErrors: string[] = [];
+
+  for (const contact of notionContacts) {
+    const pageId = (contact as any).notionPageId;
+
+    // Safety: skip contacts that somehow have no stored notionPageId
+    if (!pageId) {
+      console.warn(`[Sync] Contact ${contact.id} (${(contact as any).email}) has source='notion' but no notionPageId — skipping deletion check`);
+      continue;
+    }
+
+    if (!liveNotionPageIds.has(pageId)) {
+      try {
+        const ok = await storage.deleteContact(contact.id, userId);
+        if (ok) {
+          deleted++;
+          console.log(`[Sync] DELETED contact ${contact.id} (${(contact as any).email}) — notionPageId ${pageId} not found in Notion`);
+        } else {
+          console.warn(`[Sync] DELETE failed silently for contact ${contact.id} (${(contact as any).email})`);
+        }
+      } catch (e: any) {
+        const msg = `Failed to delete contact ${contact.id} (${(contact as any).email}): ${e.message}`;
+        console.error(`[Sync] ${msg}`);
+        deleteErrors.push(msg);
+      }
+    }
+  }
+
+  const totalErrors = [...upsertResult.errors, ...deleteErrors];
+  const inserts = upsertResult.imported;
+  const updates = upsertResult.skipped; // "skipped" in importContactsFromNotion = already-existed + updated
+
+  console.log(`[Sync] Inserts: ${inserts}`);
+  console.log(`[Sync] Updates: ${updates}`);
+  console.log(`[Sync] Deletes: ${deleted}`);
+
+  return {
+    imported: inserts,
+    skipped: updates,
+    deleted,
+    errors: totalErrors,
+  };
+}
+
 function extractNotionValue(prop: any): string | null {
   if (!prop || !prop.type) return null;
 
