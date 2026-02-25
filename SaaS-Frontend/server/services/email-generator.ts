@@ -167,7 +167,7 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
       .trim();
 
     // Retrieve sender's full name for the hard-coded signature.
-    // Falls back to username then "Adarsh" — never left blank.
+    // Falls back to username, then empty string — never a hardcoded name.
     const senderUser = await storage.getUser(userId);
     const senderName = senderUser?.fullName?.trim() || senderUser?.username?.trim() || "";
 
