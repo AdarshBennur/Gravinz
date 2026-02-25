@@ -128,12 +128,18 @@ function createRawEmail(
   messageId?: string,
   attachments: Attachment[] = []
 ): string {
-  // ── Sanitize body for transport ───────────────────────────────
-  // Light guard only — strip stray HTML tags and normalize line endings.
-  // DO NOT paragraph-collapse here: body is already formatted by
-  // email-generator.ts and the signature uses an intentional \n between
-  // "Best regards," and the sender name. Collapsing here merges them.
-  const plainBody = body
+  // ── Convert body to minimal HTML for reliable rendering ────────
+  // text/plain suffers from SMTP line folding at ~76 chars (RFC 2822).
+  // Gmail's outgoing SMTP folds long lines for external recipients,
+  // but skips folding for self-sends. This causes inconsistent formatting.
+  //
+  // Solution: send as text/html with <br> tags. Browser engine renders
+  // full-width text regardless of SMTP transport. No <p> tags (which
+  // cause excessive margin). Just <br> for line breaks — looks identical
+  // to plain text but without wrapping issues.
+
+  // Strip any residual HTML from the body (defense)
+  const cleanText = body
     .replace(/<p[^>]*>/gi, "")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -141,6 +147,22 @@ function createRawEmail(
     .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+
+  // HTML-escape the clean text, then convert newlines to <br>
+  const htmlBody = cleanText
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+
+  // Wrap in minimal styled div — no margins, no padding, just clean text
+  const fullHtml = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#222;">${htmlBody}</div>`;
+
+  // Base64-encode the HTML body for MIME safety
+  const bodyBase64 = Buffer.from(fullHtml, "utf-8")
+    .toString("base64")
+    .replace(/.{76}/g, "$&\r\n");
+
   const hasAttachments = attachments.length > 0;
   const boundary = "attach_" + Date.now().toString(16);
 
@@ -156,22 +178,12 @@ function createRawEmail(
     baseHeaders.push(`References: ${messageId}`);
   }
 
-  // ── Base64-encode body for MIME transport ──────────────────────
-  // RFC 2822 limits plain-text lines to 998 chars (SHOULD ≤78).
-  // Without encoding, Gmail folds long paragraphs at ~76 chars,
-  // inserting hard line breaks that ruin formatting.
-  // Content-Transfer-Encoding: base64 preserves exact line breaks
-  // through transit — only our intentional \n\n survives.
-  const bodyBase64 = Buffer.from(plainBody, "utf-8")
-    .toString("base64")
-    .replace(/.{76}/g, "$&\r\n");  // wrap base64 at 76 chars per RFC 2045
-
   let email: string;
 
   if (!hasAttachments) {
     const headers = [
       ...baseHeaders,
-      `Content-Type: text/plain; charset="UTF-8"`,
+      `Content-Type: text/html; charset="UTF-8"`,
       `Content-Transfer-Encoding: base64`,
     ];
     email = headers.join("\r\n") + "\r\n\r\n" + bodyBase64;
@@ -179,9 +191,9 @@ function createRawEmail(
     const headers = [...baseHeaders, `Content-Type: multipart/mixed; boundary="${boundary}"`];
     email = headers.join("\r\n") + "\r\n\r\n";
 
-    // Body part — text/plain, base64 encoded
+    // Body part — text/html, base64 encoded
     email += `--${boundary}\r\n`;
-    email += `Content-Type: text/plain; charset="UTF-8"\r\n`;
+    email += `Content-Type: text/html; charset="UTF-8"\r\n`;
     email += `Content-Transfer-Encoding: base64\r\n\r\n`;
     email += bodyBase64 + "\r\n\r\n";
 
