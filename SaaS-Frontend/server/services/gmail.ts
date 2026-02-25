@@ -128,20 +128,19 @@ function createRawEmail(
   messageId?: string,
   attachments: Attachment[] = []
 ): string {
-  // ── Hard-clean the body — strip ALL HTML tags ─────────────────
+  // ── Sanitize body for transport ───────────────────────────────
+  // Light guard only — strip stray HTML tags and normalize line endings.
+  // DO NOT paragraph-collapse here: body is already formatted by
+  // email-generator.ts and the signature uses an intentional \n between
+  // "Best regards," and the sender name. Collapsing here merges them.
   const plainBody = body
     .replace(/<p[^>]*>/gi, "")
     .replace(/<\/p>/gi, "\n\n")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<[^>]+>/g, "")
+    .replace(/\r\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
-    // Paragraph collapse: join any intra-paragraph \n with a space.
-    // This is the final defense — ensures no hard-wraps reach the wire.
-    .split("\n\n")
-    .map((para: string) => para.replace(/\n/g, " ").replace(/  +/g, " ").trim())
-    .join("\n\n")
     .trim();
-
   const hasAttachments = attachments.length > 0;
   const boundary = "attach_" + Date.now().toString(16);
 
