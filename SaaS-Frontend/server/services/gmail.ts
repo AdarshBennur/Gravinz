@@ -329,3 +329,160 @@ export async function checkForReplies(
 export function isGmailConfigured(): boolean {
   return !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FULL THREAD CONVERSATION FETCH
+// Retrieves every message in a Gmail thread (outbound + inbound) and returns
+// them in chronological order with direction determined by the sender address.
+// Used by the Inbox conversation view to show a WhatsApp-style thread.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface GmailThreadMessage {
+  gmailMessageId: string;
+  gmailThreadId: string;
+  direction: "outbound" | "inbound";
+  from: string;         // raw From header value
+  senderEmail: string;  // parsed email address of sender
+  senderName: string;   // display name extracted from From
+  subject: string;
+  body: string;         // plain text, HTML tags stripped
+  sentAt: string;       // ISO-8601
+  internalDate: number; // ms epoch — used for sort
+}
+
+function extractHeader(headers: any[], name: string): string {
+  return headers.find((h: any) => h.name?.toLowerCase() === name.toLowerCase())?.value || "";
+}
+
+function decodeBody(part: any): string {
+  // Walk MIME parts recursively to find text/plain or text/html body
+  if (!part) return "";
+
+  if (part.body?.data) {
+    // base64url → utf-8 string
+    const decoded = Buffer.from(part.body.data, "base64url").toString("utf-8");
+    if (part.mimeType === "text/plain") return decoded;
+    if (part.mimeType === "text/html") {
+      // Strip HTML tags to plain text
+      return decoded
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/p>/gi, "\n")
+        .replace(/<[^>]+>/g, "")
+        .replace(/&nbsp;/g, " ")
+        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, "\"")
+        .replace(/&#39;/g, "'")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+    }
+  }
+
+  // Multipart: prefer text/plain, fall back to text/html
+  if (part.parts && Array.isArray(part.parts)) {
+    const plainPart = part.parts.find((p: any) => p.mimeType === "text/plain");
+    if (plainPart) {
+      const result = decodeBody(plainPart);
+      if (result) return result;
+    }
+    for (const subPart of part.parts) {
+      const result = decodeBody(subPart);
+      if (result) return result;
+    }
+  }
+
+  return "";
+}
+
+function extractSenderName(fromHeader: string): string {
+  // "Display Name <email@example.com>" → "Display Name"
+  // "email@example.com" → "email@example.com"
+  const match = fromHeader.match(/^"?([^"<]+)"?\s*</);
+  if (match) return match[1].trim();
+  return fromHeader;
+}
+
+export async function getGmailThreadMessages(
+  userId: string,
+  threadId: string
+): Promise<GmailThreadMessage[]> {
+  console.log(`[Inbox Thread Fetch] ── START ──────────────────────────────────`);
+  console.log(`[Inbox Thread Fetch] threadId: ${threadId}, userId: ${userId}`);
+
+  const oauth2Client = await getAuthenticatedClient(userId);
+  const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+  // Determine user's own email so we can classify outbound vs inbound
+  const integration = await storage.getIntegration(userId, "gmail");
+  const ownEmail = ((integration?.metadata as any)?.email || "").toLowerCase();
+  console.log(`[Inbox Thread Fetch] ownEmail: "${ownEmail}"`);
+
+  const threadData = await gmail.users.threads.get({
+    userId: "me",
+    id: threadId,
+    format: "full", // need full bodies, not just metadata
+  });
+
+  const messages = threadData.data.messages || [];
+  console.log(`[Inbox Thread Fetch] Gmail API returned ${messages.length} raw messages`);
+
+  // ── RAW DIAGNOSTIC: print every message before any filtering ────────────
+  messages.forEach((msg: any, i: number) => {
+    const headers = msg.payload?.headers || [];
+    const from = extractHeader(headers, "From");
+    const subject = extractHeader(headers, "Subject");
+    const date = extractHeader(headers, "Date");
+    const emailMatch = from.match(/<(.+?)>/) || [null, from];
+    const senderEmail = (emailMatch[1] || from).toLowerCase().trim();
+    const isOutbound = senderEmail === ownEmail;
+    console.log(`[Inbox Thread Fetch] [${i + 1}/${messages.length}] RAW MESSAGE:`);
+    console.log(`  messageId    : ${msg.id}`);
+    console.log(`  from         : "${from}"`);
+    console.log(`  senderEmail  : "${senderEmail}"`);
+    console.log(`  ownEmail     : "${ownEmail}"`);
+    console.log(`  direction    : ${isOutbound ? "OUTBOUND" : "INBOUND"}`);
+    console.log(`  subject      : "${subject}"`);
+    console.log(`  date         : "${date}"`);
+    console.log(`  internalDate : ${msg.internalDate} (${new Date(parseInt(msg.internalDate || "0", 10)).toISOString()})`);
+  });
+  // ────────────────────────────────────────────────────────────────────────
+
+  const result: GmailThreadMessage[] = messages.map((msg: any) => {
+    const headers = msg.payload?.headers || [];
+    const from = extractHeader(headers, "From");
+    const subject = extractHeader(headers, "Subject");
+
+    // Direction: inbound = any message where sender != ownEmail (no exact-match tricks)
+    const emailMatch = from.match(/<(.+?)>/) || [null, from];
+    const senderEmail = (emailMatch[1] || from).toLowerCase().trim();
+    const direction: "outbound" | "inbound" = senderEmail === ownEmail ? "outbound" : "inbound";
+
+    const internalDate = parseInt(msg.internalDate || "0", 10);
+    const body = decodeBody(msg.payload);
+
+    return {
+      gmailMessageId: msg.id || "",
+      gmailThreadId: threadId,
+      direction,
+      from,
+      senderEmail,
+      senderName: extractSenderName(from),
+      subject,
+      body: body || "(no body)",
+      sentAt: new Date(internalDate).toISOString(),
+      internalDate,
+    };
+  });
+
+  // Ensure chronological order (Gmail usually returns them in order, but be safe)
+  result.sort((a, b) => a.internalDate - b.internalDate);
+
+  const outboundCount = result.filter(m => m.direction === "outbound").length;
+  const inboundCount = result.filter(m => m.direction === "inbound").length;
+  console.log(`[Inbox Thread Fetch] ── RESULT: ${result.length} messages (${outboundCount} outbound, ${inboundCount} inbound) ──`);
+
+  return result;
+}
