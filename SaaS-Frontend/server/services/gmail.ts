@@ -156,20 +156,34 @@ function createRawEmail(
     baseHeaders.push(`References: ${messageId}`);
   }
 
+  // ── Base64-encode body for MIME transport ──────────────────────
+  // RFC 2822 limits plain-text lines to 998 chars (SHOULD ≤78).
+  // Without encoding, Gmail folds long paragraphs at ~76 chars,
+  // inserting hard line breaks that ruin formatting.
+  // Content-Transfer-Encoding: base64 preserves exact line breaks
+  // through transit — only our intentional \n\n survives.
+  const bodyBase64 = Buffer.from(plainBody, "utf-8")
+    .toString("base64")
+    .replace(/.{76}/g, "$&\r\n");  // wrap base64 at 76 chars per RFC 2045
+
   let email: string;
 
   if (!hasAttachments) {
-    // Single-part text/plain — zero boundaries, zero block elements.
-    const headers = [...baseHeaders, `Content-Type: text/plain; charset="UTF-8"`];
-    email = headers.join("\r\n") + "\r\n\r\n" + plainBody;
+    const headers = [
+      ...baseHeaders,
+      `Content-Type: text/plain; charset="UTF-8"`,
+      `Content-Transfer-Encoding: base64`,
+    ];
+    email = headers.join("\r\n") + "\r\n\r\n" + bodyBase64;
   } else {
-    // multipart/mixed — text/plain body + attachments, still NO HTML.
     const headers = [...baseHeaders, `Content-Type: multipart/mixed; boundary="${boundary}"`];
     email = headers.join("\r\n") + "\r\n\r\n";
 
+    // Body part — text/plain, base64 encoded
     email += `--${boundary}\r\n`;
-    email += `Content-Type: text/plain; charset="UTF-8"\r\n\r\n`;
-    email += plainBody + "\r\n\r\n";
+    email += `Content-Type: text/plain; charset="UTF-8"\r\n`;
+    email += `Content-Transfer-Encoding: base64\r\n\r\n`;
+    email += bodyBase64 + "\r\n\r\n";
 
     for (const attachment of attachments) {
       email += `--${boundary}\r\n`;
