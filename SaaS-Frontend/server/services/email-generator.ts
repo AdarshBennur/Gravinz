@@ -169,7 +169,7 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     // Retrieve sender's full name for the hard-coded signature.
     // Falls back to username then "Adarsh" — never left blank.
     const senderUser = await storage.getUser(userId);
-    const senderName = senderUser?.fullName?.trim() || senderUser?.username?.trim() || "Adarsh";
+    const senderName = senderUser?.fullName?.trim() || senderUser?.username?.trim() || "";
 
     // Hard-append deterministic signature — AI must never control this.
     // Format: two blank lines → closing phrase → newline → name.
