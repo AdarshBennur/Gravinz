@@ -119,25 +119,16 @@ interface Attachment {
   contentType: string;
 }
 
-function createRawEmail(to: string, from: string, subject: string, body: string, threadId?: string, messageId?: string, attachments: Attachment[] = []): string {
-  const outerBoundary = "outer_" + Date.now().toString(16);
-  const altBoundary = "alt_" + Date.now().toString(16);
-
-  const headers = [
-    `To: ${to}`,
-    `From: ${from}`,
-    `Subject: ${subject}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/mixed; boundary="${outerBoundary}"`,
-  ];
-
-  if (messageId) {
-    headers.push(`In-Reply-To: ${messageId}`);
-    headers.push(`References: ${messageId}`);
-  }
-
-  // ── Plain-text body (authoritative copy) ─────────────────────
-  // Normalise the body: strip any residual HTML tags, then use raw \n\n.
+function createRawEmail(
+  to: string,
+  from: string,
+  subject: string,
+  body: string,
+  threadId?: string,
+  messageId?: string,
+  attachments: Attachment[] = []
+): string {
+  // ── Hard-clean the body — strip ALL HTML tags ─────────────────
   const plainBody = body
     .replace(/<p[^>]*>/gi, "")
     .replace(/<\/p>/gi, "\n\n")
@@ -146,49 +137,51 @@ function createRawEmail(to: string, from: string, subject: string, body: string,
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  // ── Minimal HTML body (no <p>, no margins) ───────────────────
-  // Convert double-newlines → <br><br>, single-newlines → <br>.
-  // Wrap in the simplest possible container to avoid default margins.
-  const htmlBody =
-    `<div style="font-family:sans-serif;font-size:14px;line-height:1.5;margin:0;padding:0;">` +
-    plainBody
-      .split("\n\n")
-      .map((para) => para.split("\n").join("<br>"))
-      .join("<br><br>") +
-    `</div>`;
+  const hasAttachments = attachments.length > 0;
+  const boundary = "attach_" + Date.now().toString(16);
 
-  // ── Build MIME structure ──────────────────────────────────────
-  let email = headers.join("\r\n") + "\r\n\r\n";
+  const baseHeaders = [
+    `To: ${to}`,
+    `From: ${from}`,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+  ];
 
-  // Outer: multipart/mixed (holds the message + any attachments)
-  email += `--${outerBoundary}\r\n`;
-  email += `Content-Type: multipart/alternative; boundary="${altBoundary}"\r\n\r\n`;
-
-  // Alt part 1: text/plain
-  email += `--${altBoundary}\r\n`;
-  email += `Content-Type: text/plain; charset="UTF-8"\r\n\r\n`;
-  email += plainBody + "\r\n\r\n";
-
-  // Alt part 2: text/html (minimal, no <p> margins)
-  email += `--${altBoundary}\r\n`;
-  email += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
-  email += htmlBody + "\r\n\r\n";
-
-  email += `--${altBoundary}--\r\n\r\n`;
-
-  // Attachments
-  for (const attachment of attachments) {
-    email += `--${outerBoundary}\r\n`;
-    email += `Content-Type: ${attachment.contentType}; name="${attachment.filename}"\r\n`;
-    email += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n`;
-    email += `Content-Transfer-Encoding: base64\r\n\r\n`;
-    email += attachment.content.toString("base64") + "\r\n\r\n";
+  if (messageId) {
+    baseHeaders.push(`In-Reply-To: ${messageId}`);
+    baseHeaders.push(`References: ${messageId}`);
   }
 
-  email += `--${outerBoundary}--`;
+  let email: string;
+
+  if (!hasAttachments) {
+    // Single-part text/plain — zero boundaries, zero block elements.
+    const headers = [...baseHeaders, `Content-Type: text/plain; charset="UTF-8"`];
+    email = headers.join("\r\n") + "\r\n\r\n" + plainBody;
+  } else {
+    // multipart/mixed — text/plain body + attachments, still NO HTML.
+    const headers = [...baseHeaders, `Content-Type: multipart/mixed; boundary="${boundary}"`];
+    email = headers.join("\r\n") + "\r\n\r\n";
+
+    email += `--${boundary}\r\n`;
+    email += `Content-Type: text/plain; charset="UTF-8"\r\n\r\n`;
+    email += plainBody + "\r\n\r\n";
+
+    for (const attachment of attachments) {
+      email += `--${boundary}\r\n`;
+      email += `Content-Type: ${attachment.contentType}; name="${attachment.filename}"\r\n`;
+      email += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n`;
+      email += `Content-Transfer-Encoding: base64\r\n\r\n`;
+      email += attachment.content.toString("base64") + "\r\n\r\n";
+    }
+
+    email += `--${boundary}--`;
+  }
 
   return Buffer.from(email).toString("base64url");
 }
+
+
 
 export async function sendEmail(
   userId: string,
