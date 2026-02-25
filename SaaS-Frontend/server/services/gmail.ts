@@ -119,42 +119,99 @@ interface Attachment {
   contentType: string;
 }
 
-function createRawEmail(to: string, from: string, subject: string, body: string, threadId?: string, messageId?: string, attachments: Attachment[] = []): string {
-  const boundary = "foo_bar_baz_" + Date.now().toString(16);
+function createRawEmail(
+  to: string,
+  from: string,
+  subject: string,
+  body: string,
+  threadId?: string,
+  messageId?: string,
+  attachments: Attachment[] = []
+): string {
+  // ── Convert body to minimal HTML for reliable rendering ────────
+  // text/plain suffers from SMTP line folding at ~76 chars (RFC 2822).
+  // Gmail's outgoing SMTP folds long lines for external recipients,
+  // but skips folding for self-sends. This causes inconsistent formatting.
+  //
+  // Solution: send as text/html with <br> tags. Browser engine renders
+  // full-width text regardless of SMTP transport. No <p> tags (which
+  // cause excessive margin). Just <br> for line breaks — looks identical
+  // to plain text but without wrapping issues.
 
-  const headers = [
+  // Strip any residual HTML from the body (defense)
+  const cleanText = body
+    .replace(/<p[^>]*>/gi, "")
+    .replace(/<\/p>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  // HTML-escape the clean text, then convert newlines to <br>
+  const htmlBody = cleanText
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+
+  // Wrap in minimal styled div — no margins, no padding, just clean text
+  const fullHtml = `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#222;">${htmlBody}</div>`;
+
+  // Base64-encode the HTML body for MIME safety
+  const bodyBase64 = Buffer.from(fullHtml, "utf-8")
+    .toString("base64")
+    .replace(/.{76}/g, "$&\r\n");
+
+  const hasAttachments = attachments.length > 0;
+  const boundary = "attach_" + Date.now().toString(16);
+
+  const baseHeaders = [
     `To: ${to}`,
     `From: ${from}`,
     `Subject: ${subject}`,
     `MIME-Version: 1.0`,
-    `Content-Type: multipart/mixed; boundary="${boundary}"`,
   ];
 
   if (messageId) {
-    headers.push(`In-Reply-To: ${messageId}`);
-    headers.push(`References: ${messageId}`);
+    baseHeaders.push(`In-Reply-To: ${messageId}`);
+    baseHeaders.push(`References: ${messageId}`);
   }
 
-  let email = headers.join("\r\n") + "\r\n\r\n";
+  let email: string;
 
-  // Body Part
-  email += `--${boundary}\r\n`;
-  email += `Content-Type: text/html; charset="UTF-8"\r\n\r\n`;
-  email += body + "\r\n\r\n";
+  if (!hasAttachments) {
+    const headers = [
+      ...baseHeaders,
+      `Content-Type: text/html; charset="UTF-8"`,
+      `Content-Transfer-Encoding: base64`,
+    ];
+    email = headers.join("\r\n") + "\r\n\r\n" + bodyBase64;
+  } else {
+    const headers = [...baseHeaders, `Content-Type: multipart/mixed; boundary="${boundary}"`];
+    email = headers.join("\r\n") + "\r\n\r\n";
 
-  // Attachments
-  for (const attachment of attachments) {
+    // Body part — text/html, base64 encoded
     email += `--${boundary}\r\n`;
-    email += `Content-Type: ${attachment.contentType}; name="${attachment.filename}"\r\n`;
-    email += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n`;
+    email += `Content-Type: text/html; charset="UTF-8"\r\n`;
     email += `Content-Transfer-Encoding: base64\r\n\r\n`;
-    email += attachment.content.toString("base64") + "\r\n\r\n";
-  }
+    email += bodyBase64 + "\r\n\r\n";
 
-  email += `--${boundary}--`;
+    for (const attachment of attachments) {
+      email += `--${boundary}\r\n`;
+      email += `Content-Type: ${attachment.contentType}; name="${attachment.filename}"\r\n`;
+      email += `Content-Disposition: attachment; filename="${attachment.filename}"\r\n`;
+      email += `Content-Transfer-Encoding: base64\r\n\r\n`;
+      email += attachment.content.toString("base64") + "\r\n\r\n";
+    }
+
+    email += `--${boundary}--`;
+  }
 
   return Buffer.from(email).toString("base64url");
 }
+
+
 
 export async function sendEmail(
   userId: string,

@@ -121,7 +121,8 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     6. **Follow-ups**: If this is a follow-up, acknowledge previous silence politely but pivot to a new value add. Do NOT just say "checking in".
     7. **Resume**: ${resumeUrl ? "You MUST mention that you have attached your resume." : "Do not mention a resume integration logic error."}
     8. **Formatting**: Return JSON with "reasoning", "subject", and "body".
-    9. **Structure**: Body should be HTML (p, br, b tags only).
+    9. **Structure**: Body must be PLAIN TEXT only. Use \n\n for paragraph breaks. Do NOT use any HTML tags. No markup whatsoever.
+    10. **NO CLOSING**: Do NOT write any closing phrase or sign-off. Do NOT write "Best", "Best regards", "Thanks", "Sincerely", "Cheers", or the sender's name. The system appends the signature automatically. Stop the body at the last content sentence.
 
     ## Input Data
     ${profileContext}
@@ -144,14 +145,69 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
 
     const parsed = JSON.parse(content);
 
-    // Strip quotes if they were added to the body unexpectedly
-    const cleanBody = parsed.body.replace(/^"|"$/g, "").replace(/\\n/g, "\n");
+    // ── BULLETPROOF BODY CLEANING ─────────────────────────────────
+    // Using placeholder method: this CANNOT fail regardless of how
+    // the AI formats newlines in its JSON response.
+    //
+    // Step 1: Start with raw body, strip quotes
+    let bodyText = (parsed.body || "").replace(/^"|"$/g, "");
+
+    // Step 2: Normalize ALL line endings first
+    bodyText = bodyText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+    // Step 3: Convert literal \n sequences (backslash + n) to real newlines
+    // OpenAI JSON mode sometimes uses \\n in the JSON string value
+    bodyText = bodyText.replace(/\\n/g, "\n");
+
+    // Step 4: Strip any HTML tags the AI emitted
+    bodyText = bodyText
+      .replace(/<p[^>]*>/gi, "")
+      .replace(/<\/p>/gi, "\n\n")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, "");
+
+    // Step 5: Collapse 3+ newlines → exactly 2
+    bodyText = bodyText.replace(/\n{3,}/g, "\n\n");
+
+    // Step 6: PLACEHOLDER METHOD — remove ALL single \n inside paragraphs
+    // This is the critical step. Protect paragraph breaks, kill everything else.
+    const PARA_MARKER = "%%PARA_BREAK%%";
+    bodyText = bodyText
+      .replace(/\n\n/g, PARA_MARKER)  // protect paragraph breaks
+      .replace(/\n/g, " ")            // kill ALL remaining single \n
+      .replace(/%%PARA_BREAK%%/g, "\n\n");  // restore paragraph breaks
+
+    // Step 7: Clean up spaces
+    bodyText = bodyText.replace(/ {2,}/g, " ");
+
+    // Step 8: Trim each paragraph
+    const cleanBody = bodyText
+      .split("\n\n")
+      .map((p: string) => p.trim())
+      .filter((p: string) => p.length > 0)
+      .join("\n\n")
+      // Strip any AI-generated closing phrases
+      .replace(/\n\n(Best\b[^\n]*|Thanks\b[^\n]*|Sincerely\b[^\n]*|Cheers\b[^\n]*|Warm regards\b[^\n]*|Kind regards\b[^\n]*)\n[^\n]*/gi, "")
+      .replace(/\n\n(Best\b[^\n]*|Thanks\b[^\n]*|Sincerely\b[^\n]*|Cheers\b[^\n]*|Warm regards\b[^\n]*|Kind regards\b[^\n]*)/gi, "")
+      .trim();
+
+    // Retrieve sender's full name for the hard-coded signature.
+    // Falls back to username, then empty string — never a hardcoded name.
+    const senderUser = await storage.getUser(userId);
+    const senderName = senderUser?.fullName?.trim() || senderUser?.username?.trim() || "";
+
+    // Hard-append deterministic signature — AI must never control this.
+    // Format: two blank lines → closing phrase → newline → name.
+    const bodyWithSignature = `${cleanBody}\n\nBest regards,\n${senderName}`;
 
     console.log(`[AI Reasoned]: ${parsed.reasoning}`);
+    // DIAGNOSTIC: show raw vs clean to identify wrapping source
+    console.log(`[RAW AI BODY]:\n${parsed.body}`);
+    console.log(`[CLEAN BODY SENT]:\n${bodyWithSignature}`);
 
     return {
       subject: parsed.subject,
-      body: cleanBody,
+      body: bodyWithSignature,
       fallback: false,
     };
 
@@ -173,11 +229,11 @@ function generateFallbackEmail(input: EmailGenerationInput, profileContext: stri
     const followupTemplates = [
       {
         subject: `Re: Quick question about ${contactRole || "the role"} at ${contactCompany || "your company"}`,
-        body: `Hi ${contactName || "there"},\n\nJust wanted to follow up on my previous email. I understand you're busy, but I'd love the chance to share how my experience in ${skills[0] || "this field"} could contribute to your team.\n\nWould a brief 10-minute call work this week?\n\nBest,\n${name}`,
+        body: `Hi ${contactName || "there"},\n\nJust wanted to follow up on my previous email. I understand you're busy, but I'd love the chance to share how my experience in ${skills[0] || "this field"} could contribute to your team.\n\nWould a brief 10-minute call work this week?`,
       },
       {
         subject: `Re: Following up - ${contactCompany || "opportunity"}`,
-        body: `Hi ${contactName || "there"},\n\nCircling back on my earlier note. I've been following ${contactCompany || "your company"}'s recent work and am genuinely excited about the direction you're heading.\n\nI'd appreciate even a brief response — happy to share more about my background if helpful.\n\nThanks,\n${name}`,
+        body: `Hi ${contactName || "there"},\n\nCircling back on my earlier note. I've been following ${contactCompany || "your company"}'s recent work and am genuinely excited about the direction you're heading.\n\nI'd appreciate even a brief response — happy to share more about my background if helpful.`,
       },
     ];
     const template = followupTemplates[((followupNumber || 1) - 1) % followupTemplates.length];
@@ -185,7 +241,7 @@ function generateFallbackEmail(input: EmailGenerationInput, profileContext: stri
   }
 
   const subject = `Quick question about ${contactRole || "the role"} at ${contactCompany || "your company"}`;
-  const body = `Hi ${contactName || "there"},\n\nI came across your profile and was impressed by ${contactCompany || "your company"}'s work. I'm a ${skills[0] || "software"} professional with experience in ${skills.slice(0, 3).join(", ") || "technology"}.\n\nWould you be open to a quick chat about opportunities on your team?\n\nBest,\n${name}`;
+  const body = `Hi ${contactName || "there"},\n\nI came across your profile and was impressed by ${contactCompany || "your company"}'s work. I'm a ${skills[0] || "software"} professional with experience in ${skills.slice(0, 3).join(", ") || "technology"}.\n\nWould you be open to a quick chat about opportunities on your team?`;
 
   return { subject, body, fallback: true };
 }
