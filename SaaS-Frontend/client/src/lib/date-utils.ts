@@ -19,17 +19,43 @@ import { isValid, parseISO } from "date-fns";
 const FALLBACK_TZ = "UTC";
 
 /**
+ * Normalize a bare ISO datetime string to explicit UTC.
+ *
+ * Postgres TIMESTAMP WITHOUT TIME ZONE columns (e.g. sent_at, created_at)
+ * return strings like "2026-02-25T10:35:13.75" — no Z, no offset.
+ * date-fns parseISO treats no-offset strings as LOCAL time, causing a
+ * double-conversion when we later apply formatInTimeZone.
+ *
+ * Rule: if it looks like an ISO datetime with no Z or +/- offset,
+ * it came from Postgres and IS stored as UTC → append Z.
+ * Strings that already have Z or ±HH:MM are left unchanged.
+ */
+function normalizeToUTC(value: string): string {
+    // Already has timezone info — leave alone
+    if (/[Zz]$/.test(value) || /[+-]\d{2}:\d{2}$/.test(value)) {
+        return value;
+    }
+    // Looks like ISO datetime (has T separator) → treat as UTC
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(value)) {
+        return value + "Z";
+    }
+    return value;
+}
+
+/**
  * Safely parse a date value into a Date object.
  * Handles ISO strings, Date objects, and timestamps.
+ * Bare ISO strings (no Z / offset) are treated as UTC.
  */
 function toDate(value: string | Date | null | undefined): Date | null {
     if (!value) return null;
     if (value instanceof Date) return isValid(value) ? value : null;
-    // Try ISO parse first (most common — DB timestamps are ISO strings)
-    const parsed = parseISO(value as string);
+    // Normalize no-offset ISO strings to UTC before parsing
+    const normalized = normalizeToUTC(value as string);
+    const parsed = parseISO(normalized);
     if (isValid(parsed)) return parsed;
-    // Fallback: native Date constructor
-    const fallback = new Date(value as string);
+    // Fallback: native Date constructor (handles edge cases)
+    const fallback = new Date(normalized);
     return isValid(fallback) ? fallback : null;
 }
 
