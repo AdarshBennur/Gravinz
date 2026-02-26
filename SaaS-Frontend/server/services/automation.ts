@@ -242,20 +242,24 @@ export async function processUserAutomation(userId: string) {
   const sentToday = usage?.emailsSent ?? 0;
 
   // ─── PLAN-BASED ENFORCEMENT ──────────────────────────────────────────────
-  // All limit logic is delegated to plan-guard.ts — single source of truth.
-  //   owner  → unlimited, never blocked
-  //   free   → 5/day max, blocked entirely after 14-day trial expires
+  // Effective limit = MIN(user-configured limit, plan hard cap).
+  //   owner → hard cap = Infinity → effectiveLimit = settings.dailyLimit ?? OWNER_DEFAULT
+  //   free  → hard cap = FREE_DAILY_LIMIT (5) → effectiveLimit = min(configured, 5)
+  //           trial expired → effectiveLimit = 0, fully blocked
   const user = await storage.getUser(userId);
-  const planCheck = checkPlan(user ?? { plan: "free", createdAt: new Date() }, sentToday);
+  const planCheck = checkPlan(
+    user ?? { plan: "free", createdAt: new Date() },
+    sentToday,
+    settings.dailyLimit,   // user-configured soft limit from campaign settings
+  );
   if (!planCheck.allowed) {
-    console.log(`[Automation] User ${userId} blocked by plan (${planCheck.reason}). sentToday=${sentToday}`);
+    console.log(`[Automation] User ${userId} blocked: ${planCheck.reason}. sentToday=${sentToday}`);
     return;
   }
 
-  // Owner: no quota cap — use Infinity so downstream loop never exits on quota.
-  // Free: remaining slots up to FREE_DAILY_LIMIT.
-  const remainingQuota = planCheck.isOwner ? Infinity : FREE_DAILY_LIMIT - sentToday;
-  const dailyLimit = planCheck.isOwner ? Infinity : FREE_DAILY_LIMIT;
+  const effectiveLimit = planCheck.effectiveLimit;
+  const remainingQuota = effectiveLimit === Infinity ? Infinity : effectiveLimit - sentToday;
+  const dailyLimit = effectiveLimit;
   // autoRejectAfterDays is stored as followupDelays[2] (no separate DB column needed).
   // null-like (undefined) = never auto-reject. 0 = immediate. N = wait N days.
   const _rawDelaysForReject: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];

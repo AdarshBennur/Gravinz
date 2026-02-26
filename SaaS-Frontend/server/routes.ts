@@ -786,6 +786,7 @@ export async function registerRoutes(
       const rawDelays: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];
       const clientDelays = rawDelays.slice(0, 2);
       const autoRejectAfterDays = rawDelays[2] !== undefined ? rawDelays[2] : 7;
+      const user2 = await storage.getUser(userId);
       res.json({
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
@@ -796,6 +797,7 @@ export async function registerRoutes(
         automationStatus: settings.automationStatus,
         startTime: settings.startTime ?? "09:00",
         timezone: settings.timezone ?? "America/New_York",
+        plan: user2?.plan ?? "free",
       });
     } catch (error: any) {
       console.error("Get campaign settings error:", error);
@@ -1027,7 +1029,7 @@ export async function registerRoutes(
 
       // Plan + trial info — fully server-computed, never trust frontend
       const { getTrialInfo } = await import("./services/plan-guard.ts");
-      const trialInfo = getTrialInfo(user ?? { plan: "free", createdAt: new Date() });
+      const trialInfo = getTrialInfo(user ?? { plan: "free", createdAt: new Date() }, settings?.dailyLimit);
 
       res.json({
         stats: {
