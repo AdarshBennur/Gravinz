@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Clock } from "lucide-react";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
 import { Pause, Play, Sparkles } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -50,6 +51,56 @@ function relativeTime(dateStr: string): string {
   return `${diffD}d`;
 }
 
+/**
+ * Computes how many hours + minutes remain until midnight in the given IANA timezone.
+ * Uses the same reset boundary as the automation cycle (midnight in user timezone = daily quota resets).
+ */
+function computeResetCountdown(timezone: string): string {
+  try {
+    // Current wall-clock time in the user's timezone
+    const now = new Date();
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hour12: false,
+    }).formatToParts(now);
+
+    const get = (t: string) => parseInt(parts.find(p => p.type === t)?.value ?? "0", 10);
+    const year = get("year"), month = get("month") - 1, day = get("day");
+    const hour = get("hour"), minute = get("minute"), second = get("second");
+
+    // Seconds elapsed since midnight in user TZ
+    const elapsedSec = hour * 3600 + minute * 60 + second;
+    // Seconds remaining until next midnight
+    const remainSec = 86400 - elapsedSec;
+
+    const h = Math.floor(remainSec / 3600);
+    const m = Math.floor((remainSec % 3600) / 60);
+
+    if (h === 0 && m === 0) return "Resets now";
+    if (h === 0) return `Resets in ${m}m`;
+    if (m === 0) return `Resets in ${h}h`;
+    return `Resets in ${h}h ${m}m`;
+  } catch {
+    return "";
+  }
+}
+
+function useResetCountdown(timezone: string | undefined): string {
+  const [label, setLabel] = useState("");
+
+  useEffect(() => {
+    if (!timezone) return;
+    const tick = () => setLabel(computeResetCountdown(timezone));
+    tick(); // run immediately
+    const id = setInterval(tick, 60_000); // update every minute
+    return () => clearInterval(id);
+  }, [timezone]);
+
+  return label;
+}
+
 interface DashboardData {
   stats: {
     sentToday: number;
@@ -79,6 +130,15 @@ export default function DashboardPage() {
     queryKey: ["/api/dashboard"],
     queryFn: () => apiGet<DashboardData>("/api/dashboard"),
   });
+
+  // Fetch timezone from campaign settings (same source as automation)
+  const { data: campaignSettings } = useQuery<{ timezone?: string }>({
+    queryKey: ["/api/campaign-settings"],
+    queryFn: () => apiGet<{ timezone?: string }>("/api/campaign-settings"),
+    staleTime: 5 * 60_000, // re-fetch at most every 5 min
+  });
+
+  const resetLabel = useResetCountdown(campaignSettings?.timezone);
 
   const stats = data?.stats ?? { sentToday: 0, followupsPending: 0, replies: 0, dailyLimit: 1, used: 0 };
   const activity = data?.activity ?? [];
@@ -172,6 +232,12 @@ export default function DashboardPage() {
           <div className="mt-2 text-xs text-muted-foreground" data-testid="text-limit-sub">
             {stats.used} / {stats.dailyLimit} emails used
           </div>
+          {resetLabel && (
+            <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground/70" data-testid="text-reset-countdown">
+              <Clock className="h-3 w-3" />
+              {resetLabel}
+            </div>
+          )}
         </Card>
       </div>
 
