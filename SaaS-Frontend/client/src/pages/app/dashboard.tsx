@@ -175,8 +175,11 @@ export default function DashboardPage() {
     },
   });
 
-  const progress = (!isOwner && stats.dailyLimit)
-    ? Math.round((stats.used / stats.dailyLimit) * 100)
+  // progress: always based on effectiveDailyLimit from server
+  // stats.dailyLimit is null only for owner with zero campaign config — treat as 0% in that case
+  const effectiveDailyLimit = stats.dailyLimit ?? 0;
+  const progress = effectiveDailyLimit > 0
+    ? Math.min(100, Math.round((stats.used / effectiveDailyLimit) * 100))
     : 0;
 
   return (
@@ -225,32 +228,19 @@ export default function DashboardPage() {
           </Card>
         ))}
 
-        {/* Daily limit card — renders differently by plan */}
+        {/* Daily limit card — progress bar always visible unless trial expired */}
         <Card className="glass p-5" data-testid="card-kpi-limit">
           {loading ? (
             <Skeleton className="h-20 w-full rounded-xl" />
-          ) : isOwner ? (
-            /* ── Owner: unlimited ── */
-            <div className="flex h-full flex-col justify-between" data-testid="div-owner-plan">
-              <div className="text-xs text-muted-foreground">Daily limit</div>
-              <div className="mt-2 flex items-center gap-2">
-                <div className="text-2xl font-semibold" data-testid="text-unlimited-label">
-                  {stats.sentToday}
-                </div>
-                <span className="text-xs font-medium text-primary bg-primary/10 rounded-full px-2 py-0.5" data-testid="badge-unlimited">
-                  Unlimited
-                </span>
-              </div>
-              <div className="mt-2 text-xs text-muted-foreground" data-testid="text-owner-sub">
-                Owner plan — no daily cap
-              </div>
-            </div>
           ) : trialExpired ? (
-            /* ── Free: trial expired ── */
+            /* ── Free: trial expired — no bar, sending disabled ── */
             <div className="flex h-full flex-col justify-between" data-testid="div-trial-expired">
               <div className="text-xs text-muted-foreground">Daily limit</div>
               <div className="mt-2 flex items-center gap-2">
-                <span className="text-xs font-medium text-destructive bg-destructive/10 rounded-full px-2 py-0.5" data-testid="badge-trial-expired">
+                <span
+                  className="text-xs font-medium text-destructive bg-destructive/10 rounded-full px-2 py-0.5"
+                  data-testid="badge-trial-expired"
+                >
                   Trial expired
                 </span>
               </div>
@@ -259,24 +249,37 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            /* ── Free: active trial ── */
+            /* ── Progress bar — shown for owner AND active free ── */
             <>
               <div className="flex items-center justify-between">
                 <div className="text-xs text-muted-foreground" data-testid="text-limit-label">
                   Daily limit progress
                 </div>
-                <div className="text-xs font-medium" data-testid="text-limit-percent">
-                  {progress}%
+                <div className="flex items-center gap-1.5">
+                  {isOwner && (
+                    <span
+                      className="text-xs font-medium text-primary bg-primary/10 rounded-full px-2 py-0.5"
+                      data-testid="badge-owner"
+                    >
+                      Owner
+                    </span>
+                  )}
+                  <span className="text-xs font-medium" data-testid="text-limit-percent">
+                    {progress}%
+                  </span>
                 </div>
               </div>
               <div className="mt-3">
                 <Progress value={progress} data-testid="progress-daily-limit" />
               </div>
               <div className="mt-2 text-xs text-muted-foreground" data-testid="text-limit-sub">
-                {stats.used} / {stats.dailyLimit} emails used
+                {stats.used} / {effectiveDailyLimit > 0 ? effectiveDailyLimit : "—"} emails used
               </div>
               {resetLabel && (
-                <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground/70" data-testid="text-reset-countdown">
+                <div
+                  className="mt-1 flex items-center gap-1 text-xs text-muted-foreground/70"
+                  data-testid="text-reset-countdown"
+                >
                   <Clock className="h-3 w-3" />
                   {resetLabel}
                 </div>
