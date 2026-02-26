@@ -786,6 +786,7 @@ export async function registerRoutes(
       const rawDelays: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];
       const clientDelays = rawDelays.slice(0, 2);
       const autoRejectAfterDays = rawDelays[2] !== undefined ? rawDelays[2] : 7;
+      const user2 = await storage.getUser(userId);
       res.json({
         dailyLimit: settings.dailyLimit,
         followups: settings.followupCount,
@@ -796,6 +797,7 @@ export async function registerRoutes(
         automationStatus: settings.automationStatus,
         startTime: settings.startTime ?? "09:00",
         timezone: settings.timezone ?? "America/New_York",
+        plan: user2?.plan ?? "free",
       });
     } catch (error: any) {
       console.error("Get campaign settings error:", error);
@@ -1018,13 +1020,24 @@ export async function registerRoutes(
 
     try {
       const userId = getUserId(req);
-      const [stats, activity, settings] = await Promise.all([
+      const [stats, activity, settings, user] = await Promise.all([
         storage.getDashboardStats(userId),
         storage.getActivityLog(userId, 10),
         storage.getCampaignSettings(userId),
+        storage.getUser(userId),
       ]);
+
+      // Plan + trial info — fully server-computed, never trust frontend
+      const { getTrialInfo } = await import("./services/plan-guard.ts");
+      const trialInfo = getTrialInfo(user ?? { plan: "free", createdAt: new Date() }, settings?.dailyLimit);
+
       res.json({
-        stats,
+        stats: {
+          ...stats,
+          // Override dailyLimit so frontend always renders the plan-enforced value
+          // null = unlimited (owner). Number = cap (free = 5).
+          dailyLimit: trialInfo.effectiveDailyLimit,
+        },
         activity: activity.map((a) => ({
           contact: a.contactName || "System",
           action: a.action,
@@ -1032,6 +1045,11 @@ export async function registerRoutes(
           status: a.status || "",
         })),
         automationStatus: settings?.automationStatus || "paused",
+        // Plan metadata for UI rendering decisions
+        plan: trialInfo.plan,
+        isOwner: trialInfo.isOwner,
+        trialExpiresAt: trialInfo.trialExpiresAt?.toISOString() ?? null,
+        trialExpired: trialInfo.trialExpired,
       });
     } catch (error: any) {
       console.error("Dashboard error:", error);

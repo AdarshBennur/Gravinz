@@ -5,6 +5,7 @@ import { sendEmail, checkForReplies, isGmailConfigured } from "./gmail.ts";
 import { type User, type Contact, type EmailSend, type CampaignSettings } from "../../shared/schema.ts";
 import { syncContactStatusToNotion } from "./notion.ts";
 import { eq, and, desc } from "drizzle-orm";
+import { checkPlan, FREE_DAILY_LIMIT } from "./plan-guard.ts";
 
 let automationTask: ReturnType<typeof cron.schedule> | null = null;
 let replyCheckTask: ReturnType<typeof cron.schedule> | null = null;
@@ -239,14 +240,26 @@ export async function processUserAutomation(userId: string) {
 
   const usage = await storage.getDailyUsage(userId, today);
   const sentToday = usage?.emailsSent ?? 0;
-  const dailyLimit = settings.dailyLimit ?? 80;
 
-  if (sentToday >= dailyLimit) {
-    console.log(`[Automation Debug] User ${userId}: Daily limit reached (${sentToday}/${dailyLimit}).`);
+  // ─── PLAN-BASED ENFORCEMENT ──────────────────────────────────────────────
+  // Effective limit = MIN(user-configured limit, plan hard cap).
+  //   owner → hard cap = Infinity → effectiveLimit = settings.dailyLimit ?? OWNER_DEFAULT
+  //   free  → hard cap = FREE_DAILY_LIMIT (5) → effectiveLimit = min(configured, 5)
+  //           trial expired → effectiveLimit = 0, fully blocked
+  const user = await storage.getUser(userId);
+  const planCheck = checkPlan(
+    user ?? { plan: "free", createdAt: new Date() },
+    sentToday,
+    settings.dailyLimit,   // user-configured soft limit from campaign settings
+  );
+  if (!planCheck.allowed) {
+    console.log(`[Automation] User ${userId} blocked: ${planCheck.reason}. sentToday=${sentToday}`);
     return;
   }
 
-  const remainingQuota = dailyLimit - sentToday;
+  const effectiveLimit = planCheck.effectiveLimit;
+  const remainingQuota = effectiveLimit === Infinity ? Infinity : effectiveLimit - sentToday;
+  const dailyLimit = effectiveLimit;
   // autoRejectAfterDays is stored as followupDelays[2] (no separate DB column needed).
   // null-like (undefined) = never auto-reject. 0 = immediate. N = wait N days.
   const _rawDelaysForReject: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];

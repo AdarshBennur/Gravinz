@@ -28,6 +28,7 @@ interface CampaignSettings {
   automationStatus?: string;
   startTime?: string;
   timezone?: string;
+  plan?: string;
 }
 
 const TIMEZONES = [
@@ -160,7 +161,9 @@ export default function CampaignSettingsPage() {
                 data-testid="input-daily-limit"
               />
               <div className="text-xs text-muted-foreground" data-testid="help-daily-limit">
-                Start conservative to protect deliverability.
+                {data?.plan === "owner"
+                  ? "No daily cap — set any limit as a throttle."
+                  : "Free plan allows up to 5 emails per day for 14 days. Values above 5 are auto-capped."}
               </div>
             </div>
 
