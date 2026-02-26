@@ -287,9 +287,12 @@ export async function registerRoutes(
             tone: profile.tone || "direct",
             status: profile.currentStatus || "working",
             description: profile.profileDescription || "",
-            customPrompt: profile.customPrompt || "",
+            promptOverride: profile.customPrompt || "",
             resumeUrl: profile.resumeUrl || null,
             resumeOriginalName: profile.resumeOriginalName || null,
+            linkedinUrl: (profile as any).linkedinUrl || "",
+            githubUrl: (profile as any).githubUrl || "",
+            portfolioUrl: (profile as any).portfolioUrl || "",
           }
           : null,
         experiences: exps,
@@ -304,7 +307,7 @@ export async function registerRoutes(
   app.put("/api/profile", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const { skills, roles, tone, status, description, customPrompt, experiences, projects } = req.body;
+      const { skills, roles, tone, status, description, promptOverride, linkedinUrl, githubUrl, portfolioUrl, experiences, projects } = req.body;
 
       const profilePromise = storage.upsertUserProfile(userId, {
         skills: skills ?? undefined,
@@ -312,8 +315,11 @@ export async function registerRoutes(
         tone: tone ?? undefined,
         currentStatus: status ?? undefined,
         profileDescription: description ?? undefined,
-        customPrompt: customPrompt ?? undefined,
-      });
+        customPrompt: promptOverride ?? undefined,
+        ...(linkedinUrl !== undefined && { linkedinUrl }),
+        ...(githubUrl !== undefined && { githubUrl }),
+        ...(portfolioUrl !== undefined && { portfolioUrl }),
+      } as any);
 
       const experiencesPromise = Array.isArray(experiences)
         ? storage.setExperiences(userId, experiences)
@@ -335,9 +341,12 @@ export async function registerRoutes(
         tone: profile.tone || "direct",
         status: profile.currentStatus || "working",
         description: profile.profileDescription || "",
-        customPrompt: profile.customPrompt || "",
+        promptOverride: profile.customPrompt || "",
         resumeUrl: profile.resumeUrl || null,
         resumeOriginalName: profile.resumeOriginalName || null,
+        linkedinUrl: (profile as any).linkedinUrl || "",
+        githubUrl: (profile as any).githubUrl || "",
+        portfolioUrl: (profile as any).portfolioUrl || "",
         experiences: updatedExperiences,
         projects: updatedProjects,
       });

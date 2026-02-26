@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { UploadCloud, X, Plus, Trash2, Briefcase, Rocket } from "lucide-react";
+import { UploadCloud, X, Plus, Trash2, Briefcase, Rocket, Link } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
@@ -107,6 +107,9 @@ interface ProfileData {
     promptOverride?: string;
     resumeUrl?: string;
     resumeOriginalName?: string;
+    linkedinUrl?: string;
+    githubUrl?: string;
+    portfolioUrl?: string;
   } | null;
   experiences: Experience[];
   projects: Project[];
@@ -120,6 +123,9 @@ export default function ProfileSettingsPage() {
   const [status, setStatus] = useState("working");
   const [profileDesc, setProfileDesc] = useState("");
   const [promptOverride, setPromptOverride] = useState("");
+  const [linkedinUrl, setLinkedinUrl] = useState("");
+  const [githubUrl, setGithubUrl] = useState("");
+  const [portfolioUrl, setPortfolioUrl] = useState("");
 
   const [experiences, setExperiences] = useState<Experience[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -143,6 +149,9 @@ export default function ProfileSettingsPage() {
       setStatus(p?.status ?? "working");
       setProfileDesc(p?.description ?? "");
       setPromptOverride(p?.promptOverride ?? "");
+      setLinkedinUrl(p?.linkedinUrl ?? "");
+      setGithubUrl(p?.githubUrl ?? "");
+      setPortfolioUrl(p?.portfolioUrl ?? "");
       setExperiences(data.experiences ?? []);
       setProjects(data.projects ?? []);
       if (p?.resumeUrl) {
@@ -166,6 +175,9 @@ export default function ProfileSettingsPage() {
         status,
         description: profileDesc,
         promptOverride,
+        linkedinUrl,
+        githubUrl,
+        portfolioUrl,
         experiences,
         projects,
       });
@@ -560,6 +572,45 @@ export default function ProfileSettingsPage() {
             </div>
           </Card>
 
+          <Card className="glass p-6" data-testid="card-profile-links">
+            <div className="flex items-center gap-2 mb-4">
+              <Link className="h-5 w-5 text-primary" />
+              <h2 className="text-base font-semibold">Profile Links</h2>
+            </div>
+            <div className="grid gap-4">
+              <div className="grid gap-2">
+                <Label htmlFor="linkedin-url" data-testid="label-linkedin">LinkedIn URL</Label>
+                <Input
+                  id="linkedin-url"
+                  value={linkedinUrl}
+                  onChange={(e) => setLinkedinUrl(e.target.value)}
+                  placeholder="https://linkedin.com/in/yourprofile"
+                  data-testid="input-linkedin"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="github-url" data-testid="label-github">GitHub URL</Label>
+                <Input
+                  id="github-url"
+                  value={githubUrl}
+                  onChange={(e) => setGithubUrl(e.target.value)}
+                  placeholder="https://github.com/yourusername"
+                  data-testid="input-github"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="portfolio-url" data-testid="label-portfolio">Portfolio URL</Label>
+                <Input
+                  id="portfolio-url"
+                  value={portfolioUrl}
+                  onChange={(e) => setPortfolioUrl(e.target.value)}
+                  placeholder="https://yourportfolio.com"
+                  data-testid="input-portfolio"
+                />
+              </div>
+            </div>
+          </Card>
+
           <Card className="glass p-6" data-testid="card-ai-override">
             <div className="grid gap-2">
               <Label htmlFor="prompt" data-testid="label-prompt">Custom prompt override</Label>
@@ -597,6 +648,9 @@ export default function ProfileSettingsPage() {
                   setStatus(p?.status ?? "working");
                   setProfileDesc(p?.description ?? "");
                   setPromptOverride(p?.promptOverride ?? "");
+                  setLinkedinUrl(p?.linkedinUrl ?? "");
+                  setGithubUrl(p?.githubUrl ?? "");
+                  setPortfolioUrl(p?.portfolioUrl ?? "");
                   setExperiences(data.experiences ?? []);
                   setProjects(data.projects ?? []);
                 }

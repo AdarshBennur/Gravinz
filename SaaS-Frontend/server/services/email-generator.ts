@@ -35,6 +35,16 @@ async function buildProfileContext(userId: string): Promise<string> {
   lines.push(`Preferred Tone: ${profile?.tone || "professional but conversational"}`);
   if (profile?.customPrompt) lines.push(`\n## Custom User Instructions\n${profile.customPrompt}`);
 
+  // Structured profile links — only include non-empty fields
+  const linkLines: string[] = [];
+  if ((profile as any)?.linkedinUrl) linkLines.push(`LinkedIn: ${(profile as any).linkedinUrl}`);
+  if ((profile as any)?.githubUrl) linkLines.push(`GitHub: ${(profile as any).githubUrl}`);
+  if ((profile as any)?.portfolioUrl) linkLines.push(`Portfolio: ${(profile as any).portfolioUrl}`);
+  if (linkLines.length > 0) {
+    lines.push(`\n## Profile Links (include naturally if relevant — AI decides placement)`);
+    lines.push(...linkLines);
+  }
+
   if (profile?.resumeUrl) {
     // In a real scenario, we'd fetch and parse the resume text here.
     // For now, we'll note it's available.
