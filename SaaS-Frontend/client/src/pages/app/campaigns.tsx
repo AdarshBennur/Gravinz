@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Save, Play, Square, Clock } from "lucide-react";
+import { Save, Play, Square, Clock, FlaskConical } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
@@ -16,6 +16,7 @@ import { apiGet, apiPut, apiPost } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 import { useTimezone } from "@/hooks/use-timezone";
 import { formatStartTime } from "@/lib/date-utils";
+import { EmailTestModal } from "@/components/email-test-modal";
 
 interface CampaignSettings {
   dailyLimit: number;
@@ -49,6 +50,7 @@ const TIMEZONES = [
 
 export default function CampaignSettingsPage() {
   const { toast } = useToast();
+  const [showTestModal, setShowTestModal] = useState(false);
   const [dailyLimit, setDailyLimit] = useState(80);
   const [followups, setFollowups] = useState(2);
   const [delays, setDelays] = useState<number[]>([2, 4]);
@@ -412,8 +414,30 @@ export default function CampaignSettingsPage() {
               </div>
             </div>
           </Card>
+          <Card className="glass p-6" data-testid="card-email-testing">
+            <div className="flex items-center gap-2 mb-1">
+              <FlaskConical className="h-4 w-4 text-primary" />
+              <div className="text-sm font-semibold" data-testid="text-testing-title">Email Testing</div>
+            </div>
+            <div className="mt-1 text-sm text-muted-foreground">
+              Generate a live preview using your current profile and settings, then send it to yourself to verify formatting.
+            </div>
+            <Button
+              className="mt-4 w-full"
+              variant="outline"
+              onClick={() => setShowTestModal(true)}
+              data-testid="button-open-test-modal"
+            >
+              <FlaskConical className="mr-2 h-4 w-4" />
+              Generate Test Email
+            </Button>
+          </Card>
         </div>
       </div>
+
+      {showTestModal && (
+        <EmailTestModal onClose={() => setShowTestModal(false)} />
+      )}
     </AppShell>
   );
 }

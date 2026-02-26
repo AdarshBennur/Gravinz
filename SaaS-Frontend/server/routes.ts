@@ -1634,5 +1634,88 @@ export async function registerRoutes(
   });
 
 
+  // ─── Email Testing (completely isolated from production flow) ──────────────
+  // These routes use the exact same generation/send pipeline but:
+  //   - write NOTHING to contacts, email_sends, daily_usage, or activity_log
+  //   - do not increment quotas
+  //   - do not affect automation state
+
+  app.post("/api/email-test/generate", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+
+      // Verify Gmail is connected — same check automation does
+      const gmailIntegration = await storage.getIntegration(userId, "gmail");
+      if (!gmailIntegration?.connected) {
+        return res.status(400).json({ message: "Gmail not connected. Please connect Gmail in Settings → Integrations first." });
+      }
+
+      // Verify profile exists and has at least a description or skills
+      const profile = await storage.getUserProfile(userId);
+      if (!profile) {
+        return res.status(400).json({ message: "Profile incomplete. Please fill in your profile in Settings before testing." });
+      }
+
+      // Use real generateEmail pipeline — identical to automation
+      const generated = await generateEmail({
+        userId,
+        contactName: "Test Recipient",
+        contactCompany: "Example Company",
+        contactRole: "Hiring Manager",
+        isFollowup: false,
+        followupNumber: 0,
+        resumeUrl: profile.resumeUrl ?? undefined,
+      });
+
+      res.json({
+        subject: generated.subject,
+        body: generated.body,
+        fallback: generated.fallback ?? false,
+      });
+    } catch (error: any) {
+      console.error("[Email Test] Generate error:", error);
+      res.status(500).json({ message: error.message || "Failed to generate test email" });
+    }
+  });
+
+  app.post("/api/email-test/send", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const { subject, body } = req.body as { subject: string; body: string };
+
+      if (!subject || !body) {
+        return res.status(400).json({ message: "Subject and body are required" });
+      }
+
+      // Resolve user's own email address (send to themselves)
+      const gmailIntegration = await storage.getIntegration(userId, "gmail");
+      if (!gmailIntegration?.connected) {
+        return res.status(400).json({ message: "Gmail not connected" });
+      }
+      const toEmail = (gmailIntegration.metadata as any)?.email;
+      if (!toEmail) {
+        return res.status(400).json({ message: "Could not resolve your Gmail address" });
+      }
+
+      // Send via the exact same sendEmail function automation uses
+      // No threadId, no attachments — plain send to self
+      const { sendEmail } = await import("./services/gmail");
+      const result = await sendEmail(userId, toEmail, `[TEST] ${subject}`, body);
+
+      // ⚠️ Intentionally NO writes to:
+      //   - email_sends table
+      //   - daily_usage table
+      //   - activity_log table
+      //   - contacts table
+      // This is a fully isolated test send.
+      console.log(`[Email Test] Test email sent to ${toEmail}. MessageId: ${result.messageId}`);
+
+      res.json({ message: `Test email sent to ${toEmail}`, messageId: result.messageId });
+    } catch (error: any) {
+      console.error("[Email Test] Send error:", error);
+      res.status(500).json({ message: error.message || "Failed to send test email" });
+    }
+  });
+
   return httpServer;
 }
