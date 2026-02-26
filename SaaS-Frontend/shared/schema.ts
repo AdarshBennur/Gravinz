@@ -67,6 +67,7 @@ export const users = pgTable("users", {
   email: text("email"),
   fullName: text("full_name"),
   avatarUrl: text("avatar_url"),
+  plan: text("plan").notNull().default("free"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

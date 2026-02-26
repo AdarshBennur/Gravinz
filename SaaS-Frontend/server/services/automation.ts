@@ -5,6 +5,7 @@ import { sendEmail, checkForReplies, isGmailConfigured } from "./gmail.ts";
 import { type User, type Contact, type EmailSend, type CampaignSettings } from "../../shared/schema.ts";
 import { syncContactStatusToNotion } from "./notion.ts";
 import { eq, and, desc } from "drizzle-orm";
+import { checkPlan, FREE_DAILY_LIMIT } from "./plan-guard.ts";
 
 let automationTask: ReturnType<typeof cron.schedule> | null = null;
 let replyCheckTask: ReturnType<typeof cron.schedule> | null = null;
@@ -239,14 +240,22 @@ export async function processUserAutomation(userId: string) {
 
   const usage = await storage.getDailyUsage(userId, today);
   const sentToday = usage?.emailsSent ?? 0;
-  const dailyLimit = settings.dailyLimit ?? 80;
 
-  if (sentToday >= dailyLimit) {
-    console.log(`[Automation Debug] User ${userId}: Daily limit reached (${sentToday}/${dailyLimit}).`);
+  // ─── PLAN-BASED ENFORCEMENT ──────────────────────────────────────────────
+  // All limit logic is delegated to plan-guard.ts — single source of truth.
+  //   owner  → unlimited, never blocked
+  //   free   → 5/day max, blocked entirely after 14-day trial expires
+  const user = await storage.getUser(userId);
+  const planCheck = checkPlan(user ?? { plan: "free", createdAt: new Date() }, sentToday);
+  if (!planCheck.allowed) {
+    console.log(`[Automation] User ${userId} blocked by plan (${planCheck.reason}). sentToday=${sentToday}`);
     return;
   }
 
-  const remainingQuota = dailyLimit - sentToday;
+  // Owner: no quota cap — use Infinity so downstream loop never exits on quota.
+  // Free: remaining slots up to FREE_DAILY_LIMIT.
+  const remainingQuota = planCheck.isOwner ? Infinity : FREE_DAILY_LIMIT - sentToday;
+  const dailyLimit = planCheck.isOwner ? Infinity : FREE_DAILY_LIMIT;
   // autoRejectAfterDays is stored as followupDelays[2] (no separate DB column needed).
   // null-like (undefined) = never auto-reject. 0 = immediate. N = wait N days.
   const _rawDelaysForReject: number[] = Array.isArray(settings.followupDelays) ? settings.followupDelays : [];

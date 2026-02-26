@@ -1018,13 +1018,24 @@ export async function registerRoutes(
 
     try {
       const userId = getUserId(req);
-      const [stats, activity, settings] = await Promise.all([
+      const [stats, activity, settings, user] = await Promise.all([
         storage.getDashboardStats(userId),
         storage.getActivityLog(userId, 10),
         storage.getCampaignSettings(userId),
+        storage.getUser(userId),
       ]);
+
+      // Plan + trial info — fully server-computed, never trust frontend
+      const { getTrialInfo } = await import("./services/plan-guard.ts");
+      const trialInfo = getTrialInfo(user ?? { plan: "free", createdAt: new Date() });
+
       res.json({
-        stats,
+        stats: {
+          ...stats,
+          // Override dailyLimit so frontend always renders the plan-enforced value
+          // null = unlimited (owner). Number = cap (free = 5).
+          dailyLimit: trialInfo.effectiveDailyLimit,
+        },
         activity: activity.map((a) => ({
           contact: a.contactName || "System",
           action: a.action,
@@ -1032,6 +1043,11 @@ export async function registerRoutes(
           status: a.status || "",
         })),
         automationStatus: settings?.automationStatus || "paused",
+        // Plan metadata for UI rendering decisions
+        plan: trialInfo.plan,
+        isOwner: trialInfo.isOwner,
+        trialExpiresAt: trialInfo.trialExpiresAt?.toISOString() ?? null,
+        trialExpired: trialInfo.trialExpired,
       });
     } catch (error: any) {
       console.error("Dashboard error:", error);

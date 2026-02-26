@@ -106,7 +106,7 @@ interface DashboardData {
     sentToday: number;
     followupsPending: number;
     replies: number;
-    dailyLimit: number;
+    dailyLimit: number | null; // null = unlimited (owner)
     used: number;
   };
   activity: Array<{
@@ -116,6 +116,10 @@ interface DashboardData {
     status: string;
   }>;
   automationStatus: "running" | "paused";
+  plan: string;
+  isOwner: boolean;
+  trialExpiresAt: string | null;
+  trialExpired: boolean;
 }
 
 export default function DashboardPage() {
@@ -140,9 +144,11 @@ export default function DashboardPage() {
 
   const resetLabel = useResetCountdown(campaignSettings?.timezone);
 
-  const stats = data?.stats ?? { sentToday: 0, followupsPending: 0, replies: 0, dailyLimit: 1, used: 0 };
+  const stats = data?.stats ?? { sentToday: 0, followupsPending: 0, replies: 0, dailyLimit: 5, used: 0 };
   const activity = data?.activity ?? [];
   const running = data?.automationStatus === "running";
+  const isOwner = data?.isOwner ?? false;
+  const trialExpired = data?.trialExpired ?? false;
 
   const toggleMutation = useMutation({
     mutationFn: () =>
@@ -169,7 +175,9 @@ export default function DashboardPage() {
     },
   });
 
-  const progress = stats.dailyLimit > 0 ? Math.round((stats.used / stats.dailyLimit) * 100) : 0;
+  const progress = (!isOwner && stats.dailyLimit)
+    ? Math.round((stats.used / stats.dailyLimit) * 100)
+    : 0;
 
   return (
     <AppShell
@@ -217,26 +225,63 @@ export default function DashboardPage() {
           </Card>
         ))}
 
+        {/* Daily limit card — renders differently by plan */}
         <Card className="glass p-5" data-testid="card-kpi-limit">
-          <div className="flex items-center justify-between">
-            <div className="text-xs text-muted-foreground" data-testid="text-limit-label">
-              Daily limit progress
+          {loading ? (
+            <Skeleton className="h-20 w-full rounded-xl" />
+          ) : isOwner ? (
+            /* ── Owner: unlimited ── */
+            <div className="flex h-full flex-col justify-between" data-testid="div-owner-plan">
+              <div className="text-xs text-muted-foreground">Daily limit</div>
+              <div className="mt-2 flex items-center gap-2">
+                <div className="text-2xl font-semibold" data-testid="text-unlimited-label">
+                  {stats.sentToday}
+                </div>
+                <span className="text-xs font-medium text-primary bg-primary/10 rounded-full px-2 py-0.5" data-testid="badge-unlimited">
+                  Unlimited
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground" data-testid="text-owner-sub">
+                Owner plan — no daily cap
+              </div>
             </div>
-            <div className="text-xs font-medium" data-testid="text-limit-percent">
-              {progress}%
+          ) : trialExpired ? (
+            /* ── Free: trial expired ── */
+            <div className="flex h-full flex-col justify-between" data-testid="div-trial-expired">
+              <div className="text-xs text-muted-foreground">Daily limit</div>
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-xs font-medium text-destructive bg-destructive/10 rounded-full px-2 py-0.5" data-testid="badge-trial-expired">
+                  Trial expired
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground" data-testid="text-trial-expired-sub">
+                Your 14-day free trial has ended. Sending is disabled.
+              </div>
             </div>
-          </div>
-          <div className="mt-3">
-            <Progress value={progress} data-testid="progress-daily-limit" />
-          </div>
-          <div className="mt-2 text-xs text-muted-foreground" data-testid="text-limit-sub">
-            {stats.used} / {stats.dailyLimit} emails used
-          </div>
-          {resetLabel && (
-            <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground/70" data-testid="text-reset-countdown">
-              <Clock className="h-3 w-3" />
-              {resetLabel}
-            </div>
+          ) : (
+            /* ── Free: active trial ── */
+            <>
+              <div className="flex items-center justify-between">
+                <div className="text-xs text-muted-foreground" data-testid="text-limit-label">
+                  Daily limit progress
+                </div>
+                <div className="text-xs font-medium" data-testid="text-limit-percent">
+                  {progress}%
+                </div>
+              </div>
+              <div className="mt-3">
+                <Progress value={progress} data-testid="progress-daily-limit" />
+              </div>
+              <div className="mt-2 text-xs text-muted-foreground" data-testid="text-limit-sub">
+                {stats.used} / {stats.dailyLimit} emails used
+              </div>
+              {resetLabel && (
+                <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground/70" data-testid="text-reset-countdown">
+                  <Clock className="h-3 w-3" />
+                  {resetLabel}
+                </div>
+              )}
+            </>
           )}
         </Card>
       </div>
