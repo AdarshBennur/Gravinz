@@ -280,7 +280,7 @@ export default function CampaignSettingsPage() {
                   <button
                     key={opt.key}
                     className={
-                      "rounded-xl border px-3 py-3 text-left text-sm transition-colors hover:bg-background/60 " +
+                      "rounded-xl border px-3 py-3 text-left text-sm transition-colors hover:bg-background/60 cursor-pointer " +
                       (priority === (opt.key as any) ? "bg-background/70 ring-soft" : "bg-background/40")
                     }
                     onClick={() => setPriority(opt.key as any)}

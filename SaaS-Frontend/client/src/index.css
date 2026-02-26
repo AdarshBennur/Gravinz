@@ -231,6 +231,44 @@
     @apply font-sans antialiased bg-background text-foreground transition-colors duration-500;
     letter-spacing: var(--tracking-normal);
   }
+
+  /* ── Cursor affordance (system-wide) ─────────────────────────────────────
+   * All interactive elements must show pointer cursor so users can
+   * immediately recognise clickability. Disabled variants show not-allowed.
+   * This one block covers:
+   *   - Native HTML buttons, anchors, selects, labels, summaries
+   *   - ARIA role buttons / links (Radix, headless-ui, etc.)
+   *   - Tailwind cursor-pointer utility class
+   *   - ShadCN / Radix Trigger, Item, and Tab primitives
+   * ──────────────────────────────────────────────────────────────────────── */
+  button,
+  [role="button"],
+  a,
+  a[href],
+  select,
+  label[for],
+  summary,
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"],
+  [role="link"],
+  [role="checkbox"],
+  [role="switch"],
+  [role="combobox"],
+  [tabindex]:not([tabindex="-1"]),
+  .cursor-pointer {
+    cursor: pointer;
+  }
+
+  /* Disabled states must never show pointer */
+  button:disabled,
+  button[disabled],
+  [role="button"][aria-disabled="true"],
+  [aria-disabled="true"],
+  [disabled],
+  .cursor-not-allowed {
+    cursor: not-allowed;
+  }
 }
 
 @layer utilities {
