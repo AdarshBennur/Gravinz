@@ -85,6 +85,9 @@ export const userProfiles = pgTable("user_profiles", {
   customPrompt: text("custom_prompt"),
   resumeUrl: text("resume_url"),
   resumeOriginalName: text("resume_original_name"),
+  linkedinUrl: text("linkedin_url"),
+  githubUrl: text("github_url"),
+  portfolioUrl: text("portfolio_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

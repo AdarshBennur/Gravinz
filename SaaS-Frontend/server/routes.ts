@@ -287,9 +287,12 @@ export async function registerRoutes(
             tone: profile.tone || "direct",
             status: profile.currentStatus || "working",
             description: profile.profileDescription || "",
-            customPrompt: profile.customPrompt || "",
+            promptOverride: profile.customPrompt || "",
             resumeUrl: profile.resumeUrl || null,
             resumeOriginalName: profile.resumeOriginalName || null,
+            linkedinUrl: (profile as any).linkedinUrl || "",
+            githubUrl: (profile as any).githubUrl || "",
+            portfolioUrl: (profile as any).portfolioUrl || "",
           }
           : null,
         experiences: exps,
@@ -304,15 +307,16 @@ export async function registerRoutes(
   app.put("/api/profile", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      const { skills, roles, tone, status, description, customPrompt, experiences, projects } = req.body;
+      const { skills, roles, tone, status, description, promptOverride, linkedinUrl, githubUrl, portfolioUrl, experiences, projects } = req.body;
 
+      // ── Phase 1: Upsert stable columns (never fails) ──────────────────────
       const profilePromise = storage.upsertUserProfile(userId, {
         skills: skills ?? undefined,
         targetRoles: roles ?? undefined,
         tone: tone ?? undefined,
         currentStatus: status ?? undefined,
         profileDescription: description ?? undefined,
-        customPrompt: customPrompt ?? undefined,
+        customPrompt: promptOverride ?? undefined,
       });
 
       const experiencesPromise = Array.isArray(experiences)
@@ -326,8 +330,41 @@ export async function registerRoutes(
       const [profile, updatedExperiences, updatedProjects] = await Promise.all([
         profilePromise,
         experiencesPromise,
-        projectsPromise
+        projectsPromise,
       ]);
+
+      // ── Phase 2: Update profile link columns (guarded — skips if columns not yet migrated) ──
+      let savedLinkedinUrl = "";
+      let savedGithubUrl = "";
+      let savedPortfolioUrl = "";
+
+      try {
+        const linkPayload: Record<string, string> = {};
+        if (linkedinUrl !== undefined) linkPayload["linkedin_url"] = linkedinUrl ?? "";
+        if (githubUrl !== undefined) linkPayload["github_url"] = githubUrl ?? "";
+        if (portfolioUrl !== undefined) linkPayload["portfolio_url"] = portfolioUrl ?? "";
+
+        if (Object.keys(linkPayload).length > 0) {
+          const { data: linkData, error: linkError } = await (await import("./supabase")).supabaseAdmin
+            .from("user_profiles")
+            .update(linkPayload)
+            .eq("user_id", userId)
+            .select("linkedin_url, github_url, portfolio_url")
+            .single();
+
+          if (linkError) {
+            // Columns not yet migrated — log but do NOT crash the route
+            console.warn("[Profile Update] Link columns not yet migrated:", linkError.message);
+            console.warn("Run this SQL in Supabase dashboard SQL Editor:\n  ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS linkedin_url TEXT, ADD COLUMN IF NOT EXISTS github_url TEXT, ADD COLUMN IF NOT EXISTS portfolio_url TEXT;");
+          } else if (linkData) {
+            savedLinkedinUrl = (linkData as any).linkedin_url || "";
+            savedGithubUrl = (linkData as any).github_url || "";
+            savedPortfolioUrl = (linkData as any).portfolio_url || "";
+          }
+        }
+      } catch (linkErr: any) {
+        console.warn("[Profile Update] Link field update skipped:", linkErr.message);
+      }
 
       res.json({
         skills: profile.skills || [],
@@ -335,9 +372,12 @@ export async function registerRoutes(
         tone: profile.tone || "direct",
         status: profile.currentStatus || "working",
         description: profile.profileDescription || "",
-        customPrompt: profile.customPrompt || "",
+        promptOverride: profile.customPrompt || "",
         resumeUrl: profile.resumeUrl || null,
         resumeOriginalName: profile.resumeOriginalName || null,
+        linkedinUrl: savedLinkedinUrl,
+        githubUrl: savedGithubUrl,
+        portfolioUrl: savedPortfolioUrl,
         experiences: updatedExperiences,
         projects: updatedProjects,
       });
@@ -346,6 +386,7 @@ export async function registerRoutes(
       res.status(500).json({ message: "Internal server error" });
     }
   });
+
 
   app.post("/api/profile/resume", requireAuth, upload.single("file"), async (req, res) => {
     try {
