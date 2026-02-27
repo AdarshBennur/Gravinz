@@ -6,9 +6,12 @@ interface EmailGenerationInput {
   contactName: string;
   contactCompany?: string;
   contactRole?: string;
+  appliedRole?: string;    // Notion "Applied" column — job role the sender applied for
+  companyType?: string;    // Notion "Company Type" column — e.g. SaaS, Fintech, Startup
+  jobLink?: string;        // Notion "Job Link" column — URL of the job posting (optional)
   isFollowup: boolean;
   followupNumber: number;
-  resumeUrl?: string; // Added for attachment context
+  resumeUrl?: string;
 }
 
 interface GeneratedEmail {
@@ -83,7 +86,7 @@ async function getPreviousEmails(userId: string, contactId: string): Promise<str
 }
 
 export async function generateEmail(input: EmailGenerationInput): Promise<GeneratedEmail> {
-  const { userId, contactId, contactName, contactCompany, contactRole, isFollowup, followupNumber, resumeUrl } = input;
+  const { userId, contactId, contactName, contactCompany, contactRole, appliedRole, companyType, jobLink, isFollowup, followupNumber, resumeUrl } = input;
 
   const profileContext = await buildProfileContext(userId);
 
@@ -97,6 +100,8 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
   Name: ${contactName}
   Role: ${contactRole || "Hiring Manager"}
   Company: ${contactCompany || "Unknown Company"}
+  ${companyType ? `Company Type: ${companyType}` : ""}
+  ${appliedRole ? `Applied For: ${appliedRole}` : ""}
   Type: ${isFollowup ? `Follow-up #${followupNumber}` : "First Connection"}
   ${interactionContext}
   `;
@@ -123,7 +128,7 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     Write a highly personalized, human-sounding cold email (or follow-up) from the Sender to the Recipient.
 
     ## Rules
-    1. **Analyze First**: Before writing, Reason about how the Sender's experience fits the Recipient's company/role.
+    1. **Analyze First**: Before writing, reason about how the Sender's experience fits the Recipient's company/role.
     2. **No Templates**: Do not use generic placeholders like "[Company Name]". Use provided data.
     3. **Be Specific**: Reference specific projects or skills from the Sender that matter to *this* Recipient.
     4. **Tone**: Match the Sender's preference.
@@ -133,6 +138,41 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     8. **Formatting**: Return JSON with "reasoning", "subject", and "body".
     9. **Structure**: Body must be PLAIN TEXT only. Use \n\n for paragraph breaks. Do NOT use any HTML tags. No markup whatsoever.
     10. **NO CLOSING**: Do NOT write any closing phrase or sign-off. Do NOT write "Best", "Best regards", "Thanks", "Sincerely", "Cheers", or the sender's name. The system appends the signature automatically. Stop the body at the last content sentence.
+
+    ## Applied Role (if provided)
+    ${appliedRole
+        ? `The sender has already applied for the "${appliedRole}" role at the recipient's company.
+         Naturally embed a sentence like: "I recently applied for the ${appliedRole} role at ${contactCompany || "your company"}." early in the email.
+         Frame the outreach as a follow-through on that application, not a blind cold email.
+         ${jobLink
+          ? `The job posting URL is: ${jobLink}
+              Include this link naturally in the email body — e.g. in a sentence like
+              "I came across the role here: ${jobLink}" or mention it as a reference at the end of the email.
+              Do NOT fabricate or alter the URL in any way.`
+          : "No job posting link is available — do NOT invent or guess a URL. The role may not be publicly posted yet, which is fine."}`
+        : "No specific applied role — write as a general networking/outreach email. Do NOT mention any job link."}
+
+    ## Company Type Guidance (if provided)
+    ${companyType ? `The recipient's company is categorized as: "${companyType}".
+    Use this to influence your tone and which of the sender's strengths you highlight:
+    - SaaS: emphasise scalability, product thinking, fast iteration, API integrations.
+    - Fintech: emphasise reliability, security awareness, compliance sensitivity, precision.
+    - Startup: emphasise ownership, breadth, velocity, wearing multiple hats, autonomy.
+    - IT Services / IT Consulting: emphasise delivery, project management, client-facing skills, on-time execution.
+    - Product: emphasise user empathy, roadmap prioritisation, cross-functional collaboration.
+    - E-commerce: emphasise conversion, performance, data-driven decisions.
+    - For any other type: extract the most relevant signal and match the sender's skills accordingly.` : ""}
+
+    ## Recruiter-Optimised Format (when recipient role contains "Recruiter", "Talent Acquisition", or "HR")
+    ${(contactRole || "").match(/recruiter|talent acquisition|hr/i)
+        ? `The recipient is a recruiter or HR professional — not a hiring manager.
+         Use this compact structure (no exceptions):
+         Line 1 (intro): One sentence — who you are and what you do.
+         Lines 2-4 (achievements): 2-3 quantified bullet-style achievements (use plain text dashes, not bullet symbols).
+         Last line (CTA): One sentence — invite a call, chat, or ask for referral to the right team.
+         After CTA line: If GitHub or LinkedIn profile links are available in the Sender Profile, mention them naturally.
+         Keep total word count under 100 words.`
+        : "Use standard networking/outreach email structure."}
 
     ## Input Data
     ${profileContext}

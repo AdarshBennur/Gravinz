@@ -114,15 +114,17 @@ export async function getDatabaseSchema(
 }
 
 export interface ColumnMapping {
-  email: string; // Required
-  name?: string; // Optional
-  company?: string; // Optional
-  role?: string; // Optional
-  status?: string; // NEW - Optional
-  firstEmailDate?: string; // NEW - Optional
-  followup1Date?: string; // NEW - Optional
-  followup2Date?: string; // NEW - Optional
-  jobLink?: string; // NEW - Optional
+  email: string;           // Required
+  name?: string;           // Optional
+  company?: string;        // Optional
+  role?: string;           // Optional
+  status?: string;         // Optional
+  firstEmailDate?: string; // Optional
+  followup1Date?: string;  // Optional
+  followup2Date?: string;  // Optional
+  jobLink?: string;        // Optional
+  applied?: string;        // Optional — maps to "Applied" column (job role applied for)
+  companyType?: string;    // Optional — maps to "Company Type" column
 }
 
 export async function importContactsFromNotion(
