@@ -217,6 +217,7 @@ export async function processUserAutomation(userId: string) {
   console.log(`[Automation Debug] Starting processUserAutomation for user: ${userId}`);
   const settings = await storage.getCampaignSettings(userId);
   if (!settings || settings.automationStatus !== "running") {
+    console.log(`[AUTOMATION] User ${userId} — automationStatus="${settings?.automationStatus ?? 'null'}", skipping cycle.`);
     return;
   }
 
@@ -531,6 +532,17 @@ export async function processUserAutomation(userId: string) {
       }
 
       console.log(`[AUTOMATION DEBUG] ${contact.email}: ELIGIBLE — proceeding to send.`);
+    }
+
+    // ─── MID-CYCLE STOP/PAUSE CHECK ──────────────────────────────────────────
+    // Re-fetch automationStatus from DB before every send lock acquisition.
+    // This ensures that if the user clicks Stop or Pause while a batch is running,
+    // the loop breaks immediately — at most one in-flight email will still send.
+    // Without this check, all contacts in the current batch would email regardless.
+    const freshSettings = await storage.getCampaignSettings(userId);
+    if (!freshSettings || freshSettings.automationStatus !== "running") {
+      console.log(`[AUTOMATION] User ${userId} — automationStatus changed to "${freshSettings?.automationStatus ?? 'null'}" mid-cycle. Breaking loop immediately.`);
+      break;
     }
 
     // ─── CONCURRENCY LOCK ─────────────────────────────────────────────────────
