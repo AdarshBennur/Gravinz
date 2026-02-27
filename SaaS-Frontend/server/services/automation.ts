@@ -559,9 +559,10 @@ export async function processUserAutomation(userId: string) {
         contactName: contact.name,
         contactCompany: contact.company || undefined,
         contactRole: contact.role || undefined,
-        // Pull applied role + company type from Notion raw data for personalisation
+        // Pull applied role, company type, and job link from Notion data for personalisation
         appliedRole: (contact as any).notionData?.["Applied"] || undefined,
         companyType: (contact as any).notionData?.["Company Type"] || undefined,
+        jobLink: (contact as any).jobLink || undefined,
         isFollowup: targetAction.isFollowup,
         followupNumber: targetAction.number,
         resumeUrl: userProfile?.resumeUrl || undefined,

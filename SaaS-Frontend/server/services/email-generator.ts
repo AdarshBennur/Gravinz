@@ -8,6 +8,7 @@ interface EmailGenerationInput {
   contactRole?: string;
   appliedRole?: string;    // Notion "Applied" column — job role the sender applied for
   companyType?: string;    // Notion "Company Type" column — e.g. SaaS, Fintech, Startup
+  jobLink?: string;        // Notion "Job Link" column — URL of the job posting (optional)
   isFollowup: boolean;
   followupNumber: number;
   resumeUrl?: string;
@@ -85,7 +86,7 @@ async function getPreviousEmails(userId: string, contactId: string): Promise<str
 }
 
 export async function generateEmail(input: EmailGenerationInput): Promise<GeneratedEmail> {
-  const { userId, contactId, contactName, contactCompany, contactRole, appliedRole, companyType, isFollowup, followupNumber, resumeUrl } = input;
+  const { userId, contactId, contactName, contactCompany, contactRole, appliedRole, companyType, jobLink, isFollowup, followupNumber, resumeUrl } = input;
 
   const profileContext = await buildProfileContext(userId);
 
@@ -142,8 +143,14 @@ export async function generateEmail(input: EmailGenerationInput): Promise<Genera
     ${appliedRole
         ? `The sender has already applied for the "${appliedRole}" role at the recipient's company.
          Naturally embed a sentence like: "I recently applied for the ${appliedRole} role at ${contactCompany || "your company"}." early in the email.
-         Frame the outreach as a follow-through on that application, not a blind cold email.`
-        : "No specific applied role — write as a general networking/outreach email."}
+         Frame the outreach as a follow-through on that application, not a blind cold email.
+         ${jobLink
+          ? `The job posting URL is: ${jobLink}
+              Include this link naturally in the email body — e.g. in a sentence like
+              "I came across the role here: ${jobLink}" or mention it as a reference at the end of the email.
+              Do NOT fabricate or alter the URL in any way.`
+          : "No job posting link is available — do NOT invent or guess a URL. The role may not be publicly posted yet, which is fine."}`
+        : "No specific applied role — write as a general networking/outreach email. Do NOT mention any job link."}
 
     ## Company Type Guidance (if provided)
     ${companyType ? `The recipient's company is categorized as: "${companyType}".
