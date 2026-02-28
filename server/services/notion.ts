@@ -147,7 +147,7 @@ export async function importContactsFromNotion(
 
   // LOG: Raw properties keys to verify order from API
   const rawProps = (database as any).properties;
-  console.log(`[Notion Debug] Raw database.properties keys:`, Object.keys(rawProps));
+
 
   // Extract column names using Object.entries as requested, BUT prioritize 'Title' type
   const entries = Object.entries(rawProps);
@@ -204,7 +204,7 @@ export async function importContactsFromNotion(
 
         console.log(`[Notion Import] Row ${rowNumber} - Extracted ${columnOrder.length} columns in schema order`);
         // DIAGNOSTIC: Log exact property keys from this Notion page
-        console.log(`[COLUMN KEYS] Row ${rowNumber}: ${JSON.stringify(Object.keys(props))}`);
+
 
         // Extract email for duplicate checking (if column mapping exists, use it; otherwise auto-detect)
         let email: string | null = null;
