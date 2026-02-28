@@ -19,7 +19,36 @@ import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./servi
 import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, syncContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
 import { startAutomationScheduler, stopAutomationScheduler, repairContactDates, isAutomationRunning, runAutomationCycle } from "./services/automation";
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+import {
+  validate,
+  loginSchema,
+  signupSchema,
+  profileUpdateSchema,
+  campaignSettingsSchema,
+  contactSchema,
+  generateEmailSchema,
+  emailTestSendSchema,
+  notionImportSchema,
+} from "./middleware/validation";
+
+// Multer with strict fileFilter — only PDF, DOCX, CSV allowed
+const ALLOWED_MIME_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/csv",
+];
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: (_req, file, cb) => {
+    if (ALLOWED_MIME_TYPES.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type not allowed: ${file.mimetype}. Allowed: PDF, DOCX, CSV`));
+    }
+  },
+});
 
 import { campaignSettings } from "@shared/schema";
 
@@ -32,7 +61,7 @@ export async function registerRoutes(
 
   // ─── Auth Endpoints (Supabase) ───────────────────────────────────────
 
-  app.post("/api/auth/signup", async (req, res) => {
+  app.post("/api/auth/signup", validate(signupSchema), async (req, res) => {
     try {
       const { username, password, email, fullName } = req.body;
       if (!username || !password) {
@@ -54,8 +83,8 @@ export async function registerRoutes(
         if (authError.message?.includes("already")) {
           return res.status(409).json({ message: "Username or email already taken" });
         }
-        console.error("Supabase auth signup error:", authError);
-        return res.status(400).json({ message: authError.message });
+        console.error("Supabase auth signup error:", authError.message);
+        return res.status(400).json({ message: "Signup failed. Please try again." });
       }
 
       // Create user row in our database (using Supabase Auth UID as id)
@@ -115,7 +144,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/auth/login", async (req, res) => {
+  app.post("/api/auth/login", validate(loginSchema), async (req, res) => {
     try {
       const { username, password } = req.body;
       if (!username || !password) {
@@ -164,12 +193,12 @@ export async function registerRoutes(
   app.post("/api/auth/oauth-sync", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
-      console.log("[OAuth Sync] User ID from JWT:", userId);
+
 
       // Check if user already exists in database
       const existingUser = await storage.getUser(userId);
       if (existingUser) {
-        console.log("[OAuth Sync] User already exists:", existingUser.username);
+        console.log("[OAuth Sync] User already synced");
         return res.json({
           message: "User already synced",
           user: {
@@ -182,7 +211,7 @@ export async function registerRoutes(
         });
       }
 
-      console.log("[OAuth Sync] User not found, creating new user...");
+      console.log("[OAuth Sync] Creating new user...");
 
       // Get user data from Supabase Auth
       const { data: { user: supabaseUser }, error: userError } = await supabaseAdmin.auth.admin.getUserById(userId);
@@ -200,7 +229,7 @@ export async function registerRoutes(
       const avatarUrl = supabaseUser.user_metadata?.avatar_url ||
         supabaseUser.user_metadata?.picture || null;
 
-      console.log("[OAuth Sync] Supabase user data:", { email, fullName, avatarUrl });
+
 
       // Generate username from email or name
       let username = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -215,7 +244,7 @@ export async function registerRoutes(
         counter++;
       }
 
-      console.log("[OAuth Sync] Creating user with username:", uniqueUsername);
+
 
       // Create user record using storage (ensures consistency with getUser)
       const newUser = await storage.createUser({
@@ -227,7 +256,7 @@ export async function registerRoutes(
         avatarUrl: avatarUrl,
       });
 
-      console.log("[OAuth Sync] User created successfully:", newUser.id);
+      console.log("[OAuth Sync] User created.");
 
       res.json({
         message: "User synced successfully",
@@ -241,7 +270,7 @@ export async function registerRoutes(
       });
     } catch (error: any) {
       console.error("[OAuth Sync] Error:", error);
-      res.status(500).json({ message: "Failed to sync user", error: error.message });
+      res.status(500).json({ message: "Internal server error" });
     }
   });
 
@@ -304,7 +333,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/profile", requireAuth, async (req, res) => {
+  app.put("/api/profile", requireAuth, validate(profileUpdateSchema), async (req, res) => {
     try {
       const userId = getUserId(req);
       const { skills, roles, tone, status, description, promptOverride, linkedinUrl, githubUrl, portfolioUrl, experiences, projects } = req.body;
@@ -578,7 +607,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/contacts", requireAuth, async (req, res) => {
+  app.post("/api/contacts", requireAuth, validate(contactSchema), async (req, res) => {
     try {
       const userId = getUserId(req);
       const contact = await storage.createContact(userId, req.body);
@@ -615,7 +644,7 @@ export async function registerRoutes(
       res.json({ deleted, message: "All contacts cleared from application." });
     } catch (error: any) {
       console.error("[contacts/clear] Error:", error);
-      res.status(500).json({ message: error.message || "Internal server error" });
+      res.status(500).json({ message: "Internal server error" });
     }
   });
 
@@ -805,7 +834,7 @@ export async function registerRoutes(
     }
   });
 
-  app.put("/api/campaign-settings", requireAuth, async (req, res) => {
+  app.put("/api/campaign-settings", requireAuth, validate(campaignSettingsSchema), async (req, res) => {
     try {
       const userId = getUserId(req);
       const { dailyLimit, followups, delays, priority, balanced, startTime, timezone, autoRejectAfterDays } = req.body;
@@ -1291,7 +1320,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/integrations/notion/import", requireAuth, async (req, res) => {
+  app.post("/api/integrations/notion/import", requireAuth, validate(notionImportSchema), async (req, res) => {
     try {
       const userId = getUserId(req);
       const { databaseId, columnMapping } = req.body;
@@ -1359,7 +1388,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/ai/generate-email", requireAuth, async (req, res) => {
+  app.post("/api/ai/generate-email", requireAuth, validate(generateEmailSchema), async (req, res) => {
     try {
       const userId = getUserId(req);
       const { contactId, contactName, contactCompany, contactRole, isFollowup, followupNumber } = req.body;
@@ -1696,7 +1725,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/email-test/send", requireAuth, async (req, res) => {
+  app.post("/api/email-test/send", requireAuth, validate(emailTestSendSchema), async (req, res) => {
     try {
       const userId = getUserId(req);
       const { subject, body } = req.body as { subject: string; body: string };

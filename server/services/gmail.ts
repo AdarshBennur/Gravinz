@@ -89,7 +89,7 @@ async function getAuthenticatedClient(userId: string) {
   });
 
   if (expiryDate && new Date() >= expiryDate) {
-    console.log(`[Gmail Debug] Token expired at ${expiryDate.toISOString()}, refreshing...`);
+    console.log(`[Gmail] Token expired, refreshing...`);
     try {
       const { credentials } = await oauth2Client.refreshAccessToken();
 
@@ -103,7 +103,7 @@ async function getAuthenticatedClient(userId: string) {
         tokenExpiresAt: credentials.expiry_date ? new Date(credentials.expiry_date) : expiryDate,
       });
       oauth2Client.setCredentials(credentials);
-      console.log(`[Gmail Debug] Token refreshed successfully.`);
+      console.log(`[Gmail] Token refreshed.`);
     } catch (err) {
       console.error("Token refresh failed:", err);
       throw new Error("Gmail token expired and refresh failed. Please reconnect Gmail.");
@@ -223,17 +223,17 @@ export async function sendEmail(
   attachments: Attachment[] = []
 ): Promise<{ messageId: string; threadId: string }> {
   if (process.env.MOCK_GMAIL === "true") {
-    console.log(`[Gmail Mock] Sending email to ${to} (Subject: ${subject})`);
+    console.log(`[Gmail Mock] Sending test email.`);
     return {
       messageId: "mock_msg_" + Date.now(),
       threadId: threadId || "mock_thread_" + Date.now(),
     };
   }
-  console.log(`[Gmail Debug] Preparing to send email to: ${to}, Subject: ${subject}`);
+  console.log(`[Gmail] Preparing email send...`);
 
   try {
     const oauth2Client = await getAuthenticatedClient(userId);
-    console.log(`[Gmail Debug] OAuth2 Client obtained. ClientId: ${oauth2Client._clientId}`);
+    // ClientId intentionally not logged — security
 
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
@@ -247,10 +247,10 @@ export async function sendEmail(
     const fromHeader = displayName
       ? `"${displayName}" <${fromEmail}>`
       : fromEmail;
-    console.log(`[Gmail Debug] Sending as: ${fromHeader}`);
+    // fromHeader intentionally not logged — contains PII
 
     const raw = createRawEmail(to, fromHeader, subject, body, threadId, inReplyToMessageId, attachments);
-    console.log(`[Gmail Debug] Raw email constructed. Length: ${raw.length} chars`);
+
 
     const sendParams: any = {
       userId: "me",
@@ -259,23 +259,22 @@ export async function sendEmail(
 
     if (threadId) {
       sendParams.requestBody.threadId = threadId;
-      console.log(`[Gmail Debug] Threading enabled. Thread ID: ${threadId}`);
+
     }
 
-    console.log(`[Gmail Debug] Sending payload to Gmail API...`);
+
     const result = await gmail.users.messages.send(sendParams);
 
-    console.log(`[Gmail Debug] Gmail API Response Status: ${result.status}`);
-    console.log(`[Gmail Debug] Sent Message ID: ${result.data.id}, Thread ID: ${result.data.threadId}`);
+    console.log(`[Gmail] Send complete. Status: ${result.status}`);
 
     return {
       messageId: result.data.id || "",
       threadId: result.data.threadId || "",
     };
   } catch (error: any) {
-    console.error("[Gmail Debug] CRITICAL SEND FAILURE:", error);
-    if (error.response) {
-      console.error("[Gmail Debug] API Error Response:", JSON.stringify(error.response.data, null, 2));
+    console.error("[Gmail] Send failure:", error.message || error);
+    if (error.response?.status) {
+      console.error(`[Gmail] API error status: ${error.response.status}`);
     }
     throw error;
   }
@@ -330,7 +329,7 @@ export async function checkForReplies(
 
   for (const thread of campaignThreads) {
     try {
-      console.log(`[Reply Check] Fetching thread ${thread.threadId} for contact ${thread.contactEmail}`);
+      console.log(`[Reply Check] Checking thread ${thread.threadId}`);
 
       const threadData = await gmail.users.threads.get({
         userId: "me",
@@ -357,11 +356,11 @@ export async function checkForReplies(
 
         // Only count as reply if it arrived AFTER we sent the campaign email
         if (msgDate <= thread.sentAt) {
-          console.log(`[Reply Check] Skipping pre-campaign message in thread ${thread.threadId} from ${senderEmail} (${msgDate.toISOString()} <= sent ${thread.sentAt.toISOString()})`);
+
           continue;
         }
 
-        console.log(`[Reply Check] ✅ Thread-specific reply from ${senderEmail} in thread ${thread.threadId} at ${msgDate.toISOString()}`);
+        console.log(`[Reply Check] Reply detected in thread ${thread.threadId}`);
         replies.push({
           contactId: thread.contactId,
           contactEmail: thread.contactEmail,
@@ -373,10 +372,10 @@ export async function checkForReplies(
       }
 
       if (!foundReply) {
-        console.log(`[Reply Check] No reply yet in thread ${thread.threadId} for ${thread.contactEmail}`);
+
       }
     } catch (e: any) {
-      console.error(`[Reply Check] Failed to fetch thread ${thread.threadId} for ${thread.contactEmail}:`, e.message);
+      console.error(`[Reply Check] Thread ${thread.threadId} fetch error:`, e.message);
     }
   }
 
@@ -466,8 +465,7 @@ export async function getGmailThreadMessages(
   userId: string,
   threadId: string
 ): Promise<GmailThreadMessage[]> {
-  console.log(`[Inbox Thread Fetch] ── START ──────────────────────────────────`);
-  console.log(`[Inbox Thread Fetch] threadId: ${threadId}, userId: ${userId}`);
+  console.log(`[Inbox Thread Fetch] Fetching thread...`);
 
   const oauth2Client = await getAuthenticatedClient(userId);
   const gmail = google.gmail({ version: "v1", auth: oauth2Client });
@@ -475,7 +473,7 @@ export async function getGmailThreadMessages(
   // Determine user's own email so we can classify outbound vs inbound
   const integration = await storage.getIntegration(userId, "gmail");
   const ownEmail = ((integration?.metadata as any)?.email || "").toLowerCase();
-  console.log(`[Inbox Thread Fetch] ownEmail: "${ownEmail}"`);
+
 
   const threadData = await gmail.users.threads.get({
     userId: "me",
@@ -484,28 +482,7 @@ export async function getGmailThreadMessages(
   });
 
   const messages = threadData.data.messages || [];
-  console.log(`[Inbox Thread Fetch] Gmail API returned ${messages.length} raw messages`);
-
-  // ── RAW DIAGNOSTIC: print every message before any filtering ────────────
-  messages.forEach((msg: any, i: number) => {
-    const headers = msg.payload?.headers || [];
-    const from = extractHeader(headers, "From");
-    const subject = extractHeader(headers, "Subject");
-    const date = extractHeader(headers, "Date");
-    const emailMatch = from.match(/<(.+?)>/) || [null, from];
-    const senderEmail = (emailMatch[1] || from).toLowerCase().trim();
-    const isOutbound = senderEmail === ownEmail;
-    console.log(`[Inbox Thread Fetch] [${i + 1}/${messages.length}] RAW MESSAGE:`);
-    console.log(`  messageId    : ${msg.id}`);
-    console.log(`  from         : "${from}"`);
-    console.log(`  senderEmail  : "${senderEmail}"`);
-    console.log(`  ownEmail     : "${ownEmail}"`);
-    console.log(`  direction    : ${isOutbound ? "OUTBOUND" : "INBOUND"}`);
-    console.log(`  subject      : "${subject}"`);
-    console.log(`  date         : "${date}"`);
-    console.log(`  internalDate : ${msg.internalDate} (${new Date(parseInt(msg.internalDate || "0", 10)).toISOString()})`);
-  });
-  // ────────────────────────────────────────────────────────────────────────
+  console.log(`[Inbox Thread Fetch] ${messages.length} messages in thread`);
 
   const result: GmailThreadMessage[] = messages.map((msg: any) => {
     const headers = msg.payload?.headers || [];
@@ -537,9 +514,7 @@ export async function getGmailThreadMessages(
   // Ensure chronological order (Gmail usually returns them in order, but be safe)
   result.sort((a, b) => a.internalDate - b.internalDate);
 
-  const outboundCount = result.filter(m => m.direction === "outbound").length;
-  const inboundCount = result.filter(m => m.direction === "inbound").length;
-  console.log(`[Inbox Thread Fetch] ── RESULT: ${result.length} messages (${outboundCount} outbound, ${inboundCount} inbound) ──`);
+  console.log(`[Inbox Thread Fetch] ${result.length} messages processed`);
 
   return result;
 }

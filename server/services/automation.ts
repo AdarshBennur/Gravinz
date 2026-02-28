@@ -1,7 +1,8 @@
 import cron from "node-cron";
 import { storage } from "../storage";
 import { generateEmail } from "./email-generator.ts";
-import { sendEmail, checkForReplies, isGmailConfigured } from "./gmail.ts";
+import { checkForReplies, isGmailConfigured } from "./gmail.ts";
+import { sendEmailWithRetry } from "./gmail-retry.ts";
 import { type User, type Contact, type EmailSend, type CampaignSettings } from "../../shared/schema.ts";
 import { syncContactStatusToNotion } from "./notion.ts";
 import { eq, and, desc } from "drizzle-orm";
@@ -20,8 +21,8 @@ export function startAutomationScheduler() {
     replyCheckTask.stop();
   }
 
-  // Run every 5 minutes
-  automationTask = cron.schedule("*/5 * * * *", async () => {
+  // Run every minute
+  automationTask = cron.schedule("* * * * *", async () => {
     console.log("[Automation] Running send cycle...");
     await runAutomationCycle();
   });
@@ -32,7 +33,7 @@ export function startAutomationScheduler() {
     await runReplyCheck();
   });
 
-  console.log("[Automation] Scheduler started - send cycle every 5 min, reply check every 2 min");
+  console.log("[Automation] Scheduler started - send cycle every min, reply check every min");
 }
 
 export function stopAutomationScheduler() {
@@ -613,7 +614,7 @@ export async function processUserAutomation(userId: string) {
 
       // 4. Send via Gmail — MUST succeed before any state transition
       console.log(`[AUTOMATION][C] Sending via Gmail to ${contact.email}`);
-      const result = await sendEmail(
+      const result = await sendEmailWithRetry(
         userId,
         contact.email,
         emailContent.subject,
