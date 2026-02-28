@@ -12,7 +12,9 @@ function getOAuth2Client() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const port = process.env.PORT || "5000";
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:${port}`}/api/integrations/gmail/callback`;
+  const baseUrl = process.env.BASE_URL ||
+    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:${port}`);
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI || `${baseUrl}/api/integrations/gmail/callback`;
 
   if (!clientId || !clientSecret) {
     throw new Error("Google OAuth credentials not configured");
