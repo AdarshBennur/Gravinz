@@ -1715,10 +1715,30 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Could not resolve your Gmail address" });
       }
 
-      // Send via the exact same sendEmail function automation uses
-      // No threadId, no attachments — plain send to self
+      // Fetch resume from user profile — same attachment logic as real automation
+      const userProfile = await storage.getUserProfile(userId);
+      const attachments: { filename: string; content: Buffer; contentType: string }[] = [];
+      if (userProfile?.resumeUrl) {
+        try {
+          const resumeRes = await fetch(userProfile.resumeUrl);
+          if (resumeRes.ok) {
+            const buf = await resumeRes.arrayBuffer();
+            attachments.push({
+              filename: (userProfile as any).resumeOriginalName || "resume.pdf",
+              content: Buffer.from(buf),
+              contentType: "application/pdf",
+            });
+            console.log(`[Email Test] Resume fetched — will be attached as "${attachments[0].filename}"`);
+          } else {
+            console.warn(`[Email Test] Resume fetch returned ${resumeRes.status} — sending without attachment`);
+          }
+        } catch (resumeErr) {
+          console.error("[Email Test] Resume fetch failed — sending without attachment:", resumeErr);
+        }
+      }
+
       const { sendEmail } = await import("./services/gmail");
-      const result = await sendEmail(userId, toEmail, `[TEST] ${subject}`, body);
+      const result = await sendEmail(userId, toEmail, `[TEST] ${subject}`, body, undefined, undefined, attachments);
 
       // ⚠️ Intentionally NO writes to:
       //   - email_sends table
@@ -1726,9 +1746,11 @@ export async function registerRoutes(
       //   - activity_log table
       //   - contacts table
       // This is a fully isolated test send.
-      console.log(`[Email Test] Test email sent to ${toEmail}. MessageId: ${result.messageId}`);
+      const attachedLog = attachments.length > 0 ? ` with resume attached (${attachments[0].filename})` : " (no resume)";
+      console.log(`[Email Test] Test email sent to ${toEmail}${attachedLog}. MessageId: ${result.messageId}`);
 
-      res.json({ message: `Test email sent to ${toEmail}`, messageId: result.messageId });
+      res.json({ message: `Test email sent to ${toEmail}`, messageId: result.messageId, hasAttachment: attachments.length > 0 });
+
     } catch (error: any) {
       console.error("[Email Test] Send error:", error);
       res.status(500).json({ message: error.message || "Failed to send test email" });
