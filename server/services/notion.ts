@@ -6,7 +6,9 @@ function getNotionOAuthConfig() {
   const clientId = process.env.NOTION_CLIENT_ID;
   const clientSecret = process.env.NOTION_CLIENT_SECRET;
   const port = process.env.PORT || "5000";
-  const redirectUri = process.env.NOTION_REDIRECT_URI || `${process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:${port}`}/api/integrations/notion/callback`;
+  const baseUrl = process.env.BASE_URL ||
+    (process.env.REPLIT_DEV_DOMAIN ? `https://${process.env.REPLIT_DEV_DOMAIN}` : `http://localhost:${port}`);
+  const redirectUri = process.env.NOTION_REDIRECT_URI || `${baseUrl}/api/integrations/notion/callback`;
 
   if (!clientId || !clientSecret) {
     throw new Error("Notion OAuth credentials not configured");
