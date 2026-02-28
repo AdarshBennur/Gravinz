@@ -442,36 +442,54 @@ export default function InboxPage() {
                       )}
 
                       {/* ── GMAIL MESSAGES (Priority 1) ── */}
-                      {usingGmail && gmailMessages.map((msg) => {
-                        const isOutbound = msg.direction === "outbound";
-                        return (
-                          <div
-                            key={msg.gmailMessageId}
-                            className={`flex flex-col max-w-[78%] gap-1 ${isOutbound ? "self-end items-end" : "self-start items-start"
-                              }`}
-                          >
-                            <div className={`flex items-center gap-2 text-[10px] text-muted-foreground px-1 ${isOutbound ? "flex-row-reverse" : "flex-row"
-                              }`}>
-                              <span className="font-medium">{isOutbound ? "You" : msg.senderName}</span>
-                              <span>{formatFullDate(msg.sentAt, tz)}</span>
-                            </div>
+                      {usingGmail && (() => {
+                        // Build attachment lookup from local DB records (which carry
+                        // has_attachment + attachment_name stored at send time).
+                        // Match outbound Gmail messages positionally to DB send records.
+                        const outboundDbRecords = localMessages.filter(m => m.direction === "outbound");
+                        let outboundIndex = 0;
+                        return gmailMessages.map((msg) => {
+                          const isOutbound = msg.direction === "outbound";
+                          // Look up attachment metadata from DB record for this outbound position
+                          const dbRecord = isOutbound ? outboundDbRecords[outboundIndex] : undefined;
+                          if (isOutbound) outboundIndex++;
+                          return (
                             <div
-                              className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words ${isOutbound
-                                ? "bg-primary text-primary-foreground rounded-tr-sm"
-                                : "bg-muted text-foreground rounded-tl-sm"
+                              key={msg.gmailMessageId}
+                              className={`flex flex-col max-w-[78%] gap-1 ${isOutbound ? "self-end items-end" : "self-start items-start"
                                 }`}
                             >
-                              {msg.subject && (
-                                <div className={`text-[10px] font-semibold mb-1.5 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"
-                                  }`}>
-                                  {msg.subject}
+                              <div className={`flex items-center gap-2 text-[10px] text-muted-foreground px-1 ${isOutbound ? "flex-row-reverse" : "flex-row"
+                                }`}>
+                                <span className="font-medium">{isOutbound ? "You" : msg.senderName}</span>
+                                <span>{formatFullDate(msg.sentAt, tz)}</span>
+                              </div>
+                              <div
+                                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap break-words ${isOutbound
+                                  ? "bg-primary text-primary-foreground rounded-tr-sm"
+                                  : "bg-muted text-foreground rounded-tl-sm"
+                                  }`}
+                              >
+                                {msg.subject && (
+                                  <div className={`text-[10px] font-semibold mb-1.5 ${isOutbound ? "text-primary-foreground/70" : "text-muted-foreground"
+                                    }`}>
+                                    {msg.subject}
+                                  </div>
+                                )}
+                                {msg.body}
+                              </div>
+                              {/* Attachment pill — driven by DB metadata, not Gmail API */}
+                              {isOutbound && dbRecord?.hasAttachment && (
+                                <div className="flex items-center gap-2 rounded-xl border bg-muted/60 px-3 py-2 text-xs text-muted-foreground mt-0.5 self-end w-full max-w-xs">
+                                  <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                                  <span className="flex-1 truncate">{dbRecord.attachmentName || "resume.pdf"}</span>
+                                  <span className="font-medium text-primary">Attached</span>
                                 </div>
                               )}
-                              {msg.body}
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        });
+                      })()}
 
                       {/* ── FALLBACK: LOCAL DB MESSAGES (Priority 2) ── */}
                       {usingFallback && localMessages.map((msg) => {
