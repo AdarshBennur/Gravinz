@@ -3,7 +3,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import { registerRoutes } from "./routes";
-import { serveStatic } from "./static";
+// serveStatic removed — frontend is served separately via Vercel in production
 import { createServer } from "http";
 
 const app = express();
@@ -189,9 +189,9 @@ app.get("/health", (_req, res) => {
     return res.status(status).json({ message: "Internal server error" });
   });
 
-  if (process.env.NODE_ENV === "production") {
-    serveStatic(app);
-  } else {
+  // In production, frontend is served separately (Vercel).
+  // Backend is a pure API server — no static file serving needed.
+  if (process.env.NODE_ENV !== "production") {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
