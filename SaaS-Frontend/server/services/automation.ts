@@ -20,8 +20,8 @@ export function startAutomationScheduler() {
     replyCheckTask.stop();
   }
 
-  // Run every 5 minutes
-  automationTask = cron.schedule("*/5 * * * *", async () => {
+  // Run every 1 minute
+  automationTask = cron.schedule("* * * * *", async () => {
     console.log("[Automation] Running send cycle...");
     await runAutomationCycle();
   });
