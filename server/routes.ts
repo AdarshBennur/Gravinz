@@ -1162,10 +1162,12 @@ export async function registerRoutes(
         status: "system",
       });
 
-      res.redirect("/app/integrations?gmail=connected");
+      const frontendUrl = process.env.FRONTEND_URL || "";
+      res.redirect(`${frontendUrl}/app/integrations?gmail=connected`);
     } catch (error: any) {
       console.error("Gmail callback error:", error);
-      res.redirect("/app/integrations?gmail=error&message=" + encodeURIComponent(error.message));
+      const frontendUrl = process.env.FRONTEND_URL || "";
+      res.redirect(`${frontendUrl}/app/integrations?gmail=error&message=` + encodeURIComponent((error as any).message));
     }
   });
 
@@ -1241,10 +1243,12 @@ export async function registerRoutes(
         status: "system",
       });
 
-      res.redirect("/app/integrations?notion=connected");
+      const frontendUrl = process.env.FRONTEND_URL || "";
+      res.redirect(`${frontendUrl}/app/integrations?notion=connected`);
     } catch (error: any) {
       console.error("Notion callback error:", error);
-      res.redirect("/app/integrations?notion=error&message=" + encodeURIComponent(error.message));
+      const frontendUrl = process.env.FRONTEND_URL || "";
+      res.redirect(`${frontendUrl}/app/integrations?notion=error&message=` + encodeURIComponent((error as any).message));
     }
   });
 
