@@ -206,7 +206,11 @@ app.get("/health", (_req, res) => {
 // GRACEFUL SHUTDOWN — Stop scheduler, close server, close DB connections
 // ────────────────────────────────────────────────────────────────────────────
 
+let isShuttingDown = false;
+
 async function gracefulShutdown(signal: string) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
   console.log(`\n[Shutdown] Received ${signal}. Shutting down gracefully...`);
 
   try {
