@@ -15,7 +15,7 @@ import {
   insertProjectSchema,
   insertUserProfileSchema,
 } from "@shared/schema";
-import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured } from "./services/gmail";
+import { getGmailAuthUrl, handleGmailCallback, isGmailConfigured, sendEmail } from "./services/gmail";
 import { getNotionAuthUrl, handleNotionCallback, listNotionDatabases, importContactsFromNotion, syncContactsFromNotion, getDatabaseSchema, isNotionConfigured } from "./services/notion";
 import { generateEmail } from "./services/email-generator";
 import { startAutomationScheduler, stopAutomationScheduler, repairContactDates, isAutomationRunning, runAutomationCycle } from "./services/automation";
@@ -1594,6 +1594,8 @@ export async function registerRoutes(
         repliedAt: s.repliedAt,
         gmailThreadId: s.gmailThreadId,
         direction: "outbound" as const,
+        hasAttachment: (s as any).hasAttachment ?? false,
+        attachmentName: (s as any).attachmentName ?? null,
       }));
 
       // Use raw Notion status if available (matches Contacts page display)
@@ -1689,6 +1691,8 @@ export async function registerRoutes(
         subject: generated.subject,
         body: generated.body,
         fallback: generated.fallback ?? false,
+        hasResume: !!profile.resumeUrl,
+        resumeFileName: (profile as any).resumeOriginalName || (profile.resumeUrl ? "resume.pdf" : null),
       });
     } catch (error: any) {
       console.error("[Email Test] Generate error:", error);
@@ -1715,10 +1719,26 @@ export async function registerRoutes(
         return res.status(400).json({ message: "Could not resolve your Gmail address" });
       }
 
-      // Send via the exact same sendEmail function automation uses
-      // No threadId, no attachments — plain send to self
-      const { sendEmail } = await import("./services/gmail");
-      const result = await sendEmail(userId, toEmail, `[TEST] ${subject}`, body);
+      // Fetch and attach resume same way automation does
+      const profile = await storage.getUserProfile(userId);
+      let attachments: { filename: string; content: Buffer; contentType: string }[] = [];
+      if (profile?.resumeUrl) {
+        try {
+          const resumeRes = await fetch(profile.resumeUrl);
+          if (resumeRes.ok) {
+            const buf = await resumeRes.arrayBuffer();
+            attachments.push({
+              filename: (profile as any).resumeOriginalName || "resume.pdf",
+              content: Buffer.from(buf),
+              contentType: "application/pdf",
+            });
+          }
+        } catch (e) {
+          console.error("[Email Test] Resume fetch failed:", e);
+        }
+      }
+
+      const result = await sendEmail(userId, toEmail, `[TEST] ${subject}`, body, undefined, undefined, attachments);
 
       // ⚠️ Intentionally NO writes to:
       //   - email_sends table
@@ -1726,9 +1746,9 @@ export async function registerRoutes(
       //   - activity_log table
       //   - contacts table
       // This is a fully isolated test send.
-      console.log(`[Email Test] Test email sent to ${toEmail}. MessageId: ${result.messageId}`);
+      console.log(`[Email Test] Test email sent to ${toEmail}${attachments.length > 0 ? " with resume attached" : ""}. MessageId: ${result.messageId}`);
 
-      res.json({ message: `Test email sent to ${toEmail}`, messageId: result.messageId });
+      res.json({ message: `Test email sent to ${toEmail}`, messageId: result.messageId, hasAttachment: attachments.length > 0 });
     } catch (error: any) {
       console.error("[Email Test] Send error:", error);
       res.status(500).json({ message: error.message || "Failed to send test email" });

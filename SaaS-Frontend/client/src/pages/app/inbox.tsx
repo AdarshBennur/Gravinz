@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Trash2,
   RotateCcw,
+  Paperclip,
 } from "lucide-react";
 
 import AppShell from "@/components/app/app-shell";
@@ -71,6 +72,8 @@ interface ThreadMessage {
   repliedAt: string | null;
   gmailThreadId: string | null;
   direction: "outbound" | "inbound";
+  hasAttachment?: boolean;
+  attachmentName?: string | null;
 }
 
 interface GmailMessage {
@@ -215,9 +218,8 @@ export default function InboxPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
       toast({
         title: "Notion Sync Complete",
-        description: `Synced ${result.imported ?? 0} contacts${
-          result.skipped ? `, ${result.skipped} skipped` : ""
-        }`,
+        description: `Synced ${result.imported ?? 0} contacts${result.skipped ? `, ${result.skipped} skipped` : ""
+          }`,
       });
     },
     onError: (err: Error) =>
@@ -274,9 +276,8 @@ export default function InboxPage() {
                   data-testid="button-sync-notion-inbox"
                 >
                   <RotateCcw
-                    className={`mr-1.5 h-3.5 w-3.5 ${
-                      syncFromNotion.isPending ? "animate-spin" : ""
-                    }`}
+                    className={`mr-1.5 h-3.5 w-3.5 ${syncFromNotion.isPending ? "animate-spin" : ""
+                      }`}
                   />
                   {syncFromNotion.isPending ? "Syncing..." : "Sync Notion"}
                 </Button>
@@ -505,6 +506,13 @@ export default function InboxPage() {
                               )}
                               {plainBody || msg.body}
                             </div>
+                            {msg.hasAttachment && (
+                              <div className="flex items-center gap-2 rounded-xl border bg-muted/60 px-3 py-2 text-xs text-muted-foreground mt-0.5">
+                                <Paperclip className="h-3.5 w-3.5 shrink-0" />
+                                <span className="flex-1 truncate">{msg.attachmentName || "resume.pdf"}</span>
+                                <span className="font-medium text-primary">Attached</span>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

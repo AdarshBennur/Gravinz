@@ -183,8 +183,11 @@ export const emailSends = pgTable("email_sends", {
   gmailMessageId: text("gmail_message_id"),
   gmailThreadId: text("gmail_thread_id"),
   errorMessage: text("error_message"),
+  hasAttachment: boolean("has_attachment").default(false),
+  attachmentName: text("attachment_name"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
 
 export const dailyUsage = pgTable("daily_usage", {
   id: varchar("id", { length: 255 }).primaryKey().default(sql`gen_random_uuid()`),

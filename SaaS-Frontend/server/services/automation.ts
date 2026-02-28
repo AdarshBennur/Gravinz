@@ -559,7 +559,7 @@ export async function processUserAutomation(userId: string) {
     // ── LAYER 1: SEND ─────────────────────────────────────────────────────────
     // Generate + send. If this throws, we rollback the lock and skip commit.
     // Separation ensures that any post-send failure never silently skips the delay.
-    let sendResult: { emailContent: { subject: string; body: string }; result: { messageId: string; threadId?: string } } | null = null;
+    let sendResult: { emailContent: { subject: string; body: string }; result: { messageId: string; threadId?: string }; attachments: { filename: string; content: Buffer; contentType: string }[] } | null = null;
 
     try {
       // 1. Generate email content
@@ -624,7 +624,7 @@ export async function processUserAutomation(userId: string) {
       );
       console.log(`[AUTOMATION][D] Gmail confirmed — messageId: ${result.messageId} for ${contact.email}`);
 
-      sendResult = { emailContent, result };
+      sendResult = { emailContent, result, attachments };
 
     } catch (sendError: any) {
       // Send failed (AI generation or Gmail error). Roll back the lock so the
@@ -642,7 +642,7 @@ export async function processUserAutomation(userId: string) {
     // Each step is independently fault-tolerant. A DB failure must not block
     // the inbox record, and vice versa. Notion failure must never block either.
     if (sendResult) {
-      const { emailContent, result } = sendResult;
+      const { emailContent, result, attachments } = sendResult;
 
       // 2a. Update contact status + timestamp
       try {
@@ -666,6 +666,8 @@ export async function processUserAutomation(userId: string) {
           sentAt: new Date(),
           gmailMessageId: result.messageId,
           gmailThreadId: result.threadId,
+          hasAttachment: attachments.length > 0,
+          attachmentName: attachments[0]?.filename ?? null,
         });
         console.log(`[AUTOMATION][J] Inbox record created for ${contact.email}`);
       } catch (inboxErr: any) {

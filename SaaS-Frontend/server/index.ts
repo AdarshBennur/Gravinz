@@ -65,8 +65,22 @@ app.use((req, res, next) => {
   // because direct TCP connection (required for DDL) is blocked in this environment.
   // SQL: ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS resume_original_name TEXT;
 
+  // Auto-migration: attachment metadata columns on email_sends
+  try {
+    const { db } = await import("./db");
+    const { sql } = await import("drizzle-orm");
+    await db.execute(sql`
+      ALTER TABLE email_sends
+        ADD COLUMN IF NOT EXISTS has_attachment boolean DEFAULT false,
+        ADD COLUMN IF NOT EXISTS attachment_name text
+    `);
+    console.log("[Startup] email_sends attachment columns: OK");
+  } catch (e: any) {
+    console.error("[Startup] Attachment migration failed (non-fatal):", e.message);
+  }
 
   await registerRoutes(httpServer, app);
+
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
