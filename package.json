@@ -6,8 +6,8 @@
   "scripts": {
     "dev:client": "vite dev --port 5000",
     "dev": "NODE_ENV=development node --env-file .env --import tsx server/index.ts",
-    "build": "esbuild server/index.ts --bundle --platform=node --target=node22 --outfile=dist/index.js --format=esm --packages=external --define:process.env.NODE_ENV='\"production\"'",
-    "start": "NODE_ENV=production node dist/index.js",
+    "build": "esbuild server/index.ts --bundle --platform=node --target=node22 --outfile=dist/index.cjs --format=cjs --packages=external --define:process.env.NODE_ENV='\"production\"'",
+    "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
     "db:push": "drizzle-kit push"
   },
