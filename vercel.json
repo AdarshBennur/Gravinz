@@ -3,6 +3,10 @@
         {
             "source": "/api/(.*)",
             "destination": "https://gravinz.onrender.com/api/$1"
+        },
+        {
+            "source": "/(.*)",
+            "destination": "/index.html"
         }
     ],
     "buildCommand": "npm run build:client",
