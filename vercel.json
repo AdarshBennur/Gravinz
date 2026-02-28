@@ -1,0 +1,11 @@
+{
+    "rewrites": [
+        {
+            "source": "/api/(.*)",
+            "destination": "https://gravinz.onrender.com/api/$1"
+        }
+    ],
+    "buildCommand": "npm run build:client",
+    "outputDirectory": "dist/public",
+    "installCommand": "npm install"
+}
