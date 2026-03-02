@@ -113,9 +113,9 @@ export default function ProfilePage() {
             <div className="flex flex-wrap justify-center gap-2 mt-4">
               <Badge variant="secondary" className="rounded-full">{statusLabels[status] || status}</Badge>
             </div>
-            
+
             <Separator className="my-6" />
-            
+
             <div className="space-y-4">
               <Link href="/app/settings">
                 <Button className="w-full" data-testid="button-edit-settings">
@@ -189,28 +189,60 @@ export default function ProfilePage() {
               <Rocket className="h-5 w-5 text-primary" />
               <h3 className="text-lg font-semibold">Top Projects</h3>
             </div>
-            <div className="grid gap-4">
-              {projects.length > 0 ? projects.map(project => (
-                <div key={project.id} className="p-4 rounded-xl border bg-secondary/30 border-primary/5 hover:border-primary/20 transition-colors group">
-                  <div className="flex items-center justify-between mb-2">
-                    <h4 className="font-bold group-hover:text-primary transition-colors">{project.name}</h4>
-                    <div className="flex gap-2">
-                      {(typeof project.tech === "string" ? project.tech.split(",") : []).map(t => (
-                        <span key={t.trim()} className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{t.trim()}</span>
-                      ))}
-                    </div>
+            <div className="space-y-5">
+              {projects.length > 0 ? projects.map(project => {
+                const tags = (project.tech ?? "")
+                  .split(",")
+                  .map((t: string) => t.trim())
+                  .filter(Boolean);
+                const visibleTags = tags.slice(0, 8);
+                const extraCount = tags.length - visibleTags.length;
+
+                return (
+                  <div
+                    key={project.id}
+                    className="rounded-lg border border-border bg-secondary/20 p-5 space-y-3 hover:border-primary/20 transition-colors"
+                  >
+                    {/* 1 — Title */}
+                    <h4 className="text-base font-semibold tracking-tight leading-snug">
+                      {project.name}
+                    </h4>
+
+                    {/* 2 — Tech stack tags (subtle, wrapped) */}
+                    {visibleTags.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {visibleTags.map(t => (
+                          <span
+                            key={t}
+                            className="text-xs px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-medium"
+                          >
+                            {t}
+                          </span>
+                        ))}
+                        {extraCount > 0 && (
+                          <span className="text-xs px-2 py-0.5 rounded-md bg-muted text-muted-foreground font-medium">
+                            +{extraCount} more
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* 3 — Description */}
+                    {project.impact && (
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        {project.impact}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {project.impact}
-                  </p>
-                </div>
-              )) : (
+                );
+              }) : (
                 <div className="text-center py-8 text-muted-foreground">
                   No projects added yet. <Link href="/app/settings" className="text-primary underline">Add projects</Link>
                 </div>
               )}
             </div>
           </Card>
+
         </div>
       </div>
     </AppShell>
