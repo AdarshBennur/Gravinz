@@ -1168,10 +1168,8 @@ export async function registerRoutes(
       const rejected = contacts.filter(c => c.status === "rejected").length;
       const replyRate = totalSent > 0 ? Math.round((replies / totalSent) * 1000) / 10 : 0;
 
-      // Active = received at least one email, not in terminal state
-      const activeContacts = contacts.filter(c =>
-        c.status !== "not-sent" && !TERMINAL.has(c.status ?? "")
-      ).length;
+      // Active Contacts = total contacts in the DB for this user (all statuses)
+      const activeContacts = contacts.length;
 
       // Pending first emails = status "not-sent"
       const pendingFirstEmails = contacts.filter(c => c.status === "not-sent").length;
