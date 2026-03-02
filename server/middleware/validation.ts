@@ -42,7 +42,7 @@ export const signupSchema = z.object({
 
 export const profileUpdateSchema = z.object({
     skills: z.array(z.string().max(100)).max(50).optional(),
-    roles: z.array(z.string().max(100)).max(20).optional(),
+    roles: z.array(z.string().max(200)).max(20).optional(),
     tone: z.string().max(50).optional(),
     status: z.string().max(50).optional(),
     description: z.string().max(5000).optional(),
@@ -52,19 +52,23 @@ export const profileUpdateSchema = z.object({
     portfolioUrl: z.string().url().max(500).optional().or(z.literal("")),
     experiences: z.array(z.object({
         id: z.string().optional(),
-        company: z.string().max(200).optional(),
-        role: z.string().max(200).optional(),
-        duration: z.string().max(100).optional(),
-        highlights: z.string().max(5000).optional(),
+        company: z.string().max(200).optional().default(""),
+        role: z.string().max(200).optional().default(""),
+        duration: z.string().max(100).optional().default(""),
+        // frontend sends "description" — DB column is also "description"
+        description: z.string().max(5000).optional().default(""),
     })).max(20).optional(),
     projects: z.array(z.object({
         id: z.string().optional(),
-        name: z.string().max(200).optional(),
-        description: z.string().max(5000).optional(),
-        techStack: z.string().max(500).optional(),
+        name: z.string().max(200).optional().default(""),
+        // frontend sends "tech" — DB column is "tech" (NOT NULL)
+        tech: z.string().max(500).optional().default(""),
+        // frontend sends "impact" — DB column is "impact"
+        impact: z.string().max(5000).optional().default(""),
         url: z.string().max(500).optional(),
     })).max(20).optional(),
 });
+
 
 export const campaignSettingsSchema = z.object({
     dailyLimit: z.number().int().min(0).max(500).optional(),
