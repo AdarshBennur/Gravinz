@@ -336,6 +336,9 @@ export async function registerRoutes(
   app.put("/api/profile", requireAuth, validate(profileUpdateSchema), async (req, res) => {
     try {
       const userId = getUserId(req);
+      console.log("[Profile Update] userId:", userId);
+      console.log("[Profile Update] body:", JSON.stringify(req.body, null, 2));
+
       const { skills, roles, tone, status, description, promptOverride, linkedinUrl, githubUrl, portfolioUrl, experiences, projects } = req.body;
 
       // ── Phase 1: Upsert stable columns (never fails) ──────────────────────
@@ -361,6 +364,9 @@ export async function registerRoutes(
         experiencesPromise,
         projectsPromise,
       ]);
+
+      console.log("[Profile Update] saved experiences:", JSON.stringify(updatedExperiences));
+      console.log("[Profile Update] saved projects:", JSON.stringify(updatedProjects));
 
       // ── Phase 2: Update profile link columns (guarded — skips if columns not yet migrated) ──
       let savedLinkedinUrl = "";
@@ -411,8 +417,8 @@ export async function registerRoutes(
         projects: updatedProjects,
       });
     } catch (error: any) {
-      console.error("Update profile error:", error);
-      res.status(500).json({ message: "Internal server error" });
+      console.error("[Profile Update Error]", error);
+      res.status(500).json({ message: error.message || "Internal server error" });
     }
   });
 
