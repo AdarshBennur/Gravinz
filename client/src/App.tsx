@@ -6,6 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { queryClient } from "./lib/queryClient";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { TimezoneProvider } from "@/hooks/use-timezone";
+import { Analytics } from "@vercel/analytics/react";
 
 import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/auth/login";
@@ -74,6 +75,7 @@ export default function App() {
               <div className="min-h-dvh app-bg transition-colors duration-500">
                 <Router />
               </div>
+              <Analytics />
             </TimezoneProvider>
           </AuthProvider>
         </TooltipProvider>
