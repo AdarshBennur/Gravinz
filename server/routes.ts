@@ -1086,6 +1086,144 @@ export async function registerRoutes(
     }
   });
 
+  // ── Dashboard Metrics (Supabase SDK — single call, full intelligence) ─────
+  app.get("/api/dashboard/metrics", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+
+      // Campaign settings: timezone + configured follow-up count
+      const settings = await storage.getCampaignSettings(userId);
+      const tz = settings?.timezone ?? "UTC";
+      const followupCount = settings?.followupCount ?? 2;
+
+      // Today's midnight in the user's configured timezone
+      const now = new Date();
+      const tzParts = new Intl.DateTimeFormat("en-US", {
+        timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+      }).formatToParts(now);
+      const getPart = (t: string) => tzParts.find(p => p.type === t)?.value ?? "00";
+      const todayStartLocal = `${getPart("year")}-${getPart("month")}-${getPart("day")}T00:00:00`;
+
+      // ── Five parallel Supabase SDK queries ────────────────────────────────
+      const [
+        { data: allSends },
+        { data: todaySends },
+        { data: replyTimings },
+        { data: allContacts },
+      ] = await Promise.all([
+        // 1. All-time sent emails (followup_number only)
+        supabaseAdmin
+          .from("email_sends")
+          .select("followup_number")
+          .eq("user_id", userId)
+          .in("status", ["sent", "delivered", "opened", "replied"])
+          .not("sent_at", "is", null),
+
+        // 2. Today's sent emails
+        supabaseAdmin
+          .from("email_sends")
+          .select("followup_number")
+          .eq("user_id", userId)
+          .in("status", ["sent", "delivered", "opened", "replied"])
+          .not("sent_at", "is", null)
+          .gte("sent_at", todayStartLocal),
+
+        // 3. Replied emails — for avg reply time (sent_at + replied_at)
+        supabaseAdmin
+          .from("email_sends")
+          .select("sent_at, replied_at")
+          .eq("user_id", userId)
+          .eq("status", "replied")
+          .not("replied_at", "is", null)
+          .not("sent_at", "is", null),
+
+        // 4. All contacts — status + followups_sent for active/pending metrics
+        supabaseAdmin
+          .from("contacts")
+          .select("status, followups_sent")
+          .eq("user_id", userId),
+      ]);
+
+      // ── Volume metrics ────────────────────────────────────────────────────
+      const makeMap = (): Record<number, number> => {
+        const m: Record<number, number> = {};
+        for (let i = 0; i <= followupCount; i++) m[i] = 0;
+        return m;
+      };
+
+      const allMap = makeMap();
+      const todayMap = makeMap();
+      for (const r of (allSends ?? [])) allMap[Number(r.followup_number)] = (allMap[Number(r.followup_number)] ?? 0) + 1;
+      for (const r of (todaySends ?? [])) todayMap[Number(r.followup_number)] = (todayMap[Number(r.followup_number)] ?? 0) + 1;
+
+      const totalSent = Object.values(allMap).reduce((a, b) => a + b, 0);
+      const todaySent = Object.values(todayMap).reduce((a, b) => a + b, 0);
+
+      // ── Contact-level aggregation ─────────────────────────────────────────
+      const contacts = allContacts ?? [];
+      const TERMINAL = new Set(["replied", "rejected", "bounced"]);
+      const ACTIVE = new Set(["sent", "followup", "followup-1", "followup-2", "followup-3"]);
+
+      const replies = contacts.filter(c => c.status === "replied").length;
+      const rejected = contacts.filter(c => c.status === "rejected").length;
+      const replyRate = totalSent > 0 ? Math.round((replies / totalSent) * 1000) / 10 : 0;
+
+      // Active Contacts = total contacts in the DB for this user (all statuses)
+      const activeContacts = contacts.length;
+
+      // Pending first emails = status "not-sent"
+      const pendingFirstEmails = contacts.filter(c => c.status === "not-sent").length;
+
+      // Pending follow-ups by level 1..followupCount
+      // A contact needs follow-up N if: followupsSent == N-1 AND not in terminal state AND has been emailed
+      const pendingByLevel: Record<number, number> = {};
+      for (let i = 1; i <= followupCount; i++) pendingByLevel[i] = 0;
+
+      for (const c of contacts) {
+        if (TERMINAL.has(c.status ?? "") || c.status === "not-sent") continue;
+        const sent = Number(c.followups_sent ?? 0);
+        const nextLevel = sent + 1;
+        if (nextLevel >= 1 && nextLevel <= followupCount) {
+          pendingByLevel[nextLevel] = (pendingByLevel[nextLevel] ?? 0) + 1;
+        }
+      }
+      const pendingFollowupsTotal = Object.values(pendingByLevel).reduce((a, b) => a + b, 0);
+
+      // ── Average reply time ────────────────────────────────────────────────
+      // avg of (replied_at - sent_at) across replied emails → return in hours
+      let averageReplyTimeHours: number | null = null;
+      const timings = (replyTimings ?? []).filter(r => r.replied_at && r.sent_at);
+      if (timings.length > 0) {
+        const totalMs = timings.reduce((sum, r) => {
+          const diff = new Date(r.replied_at!).getTime() - new Date(r.sent_at!).getTime();
+          return sum + (diff > 0 ? diff : 0);
+        }, 0);
+        const avgHours = totalMs / timings.length / 3_600_000;
+        averageReplyTimeHours = Math.round(avgHours * 10) / 10;  // 1 decimal
+      }
+
+      res.json({
+        followupCount,
+        total: { totalSent, byFollowup: allMap },
+        today: { totalSent: todaySent, byFollowup: todayMap },
+        replies,
+        rejected,
+        replyRate,
+        funnel: { sent: totalSent, replied: replies, rejected },
+        averageReplyTimeHours,
+        activeContacts,
+        pendingFirstEmails,
+        pendingFollowups: { total: pendingFollowupsTotal, byLevel: pendingByLevel },
+      });
+    } catch (error: any) {
+      console.error("[Dashboard Metrics] error:", error);
+      res.status(500).json({ message: "Failed to load dashboard metrics" });
+    }
+  });
+
+
+
+
   app.get("/api/analytics", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);

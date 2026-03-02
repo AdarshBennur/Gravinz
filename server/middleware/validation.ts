@@ -14,9 +14,11 @@ export function validate(schema: z.ZodSchema) {
                 field: e.path.join("."),
                 message: e.message,
             }));
+            // Log exact field + message so it's visible in the terminal
+            console.error("[Validate] 400 on", req.method, req.path, "— body:", JSON.stringify(req.body));
+            console.error("[Validate] errors:", JSON.stringify(errors));
             return res.status(400).json({ message: "Validation failed", errors });
         }
-        // Replace req.body with parsed + coerced data
         req.body = result.data;
         next();
     };
@@ -65,13 +67,15 @@ export const profileUpdateSchema = z.object({
 });
 
 export const campaignSettingsSchema = z.object({
-    dailyLimit: z.number().int().min(1).max(500).optional(),
+    dailyLimit: z.number().int().min(0).max(500).optional(),
     followups: z.number().int().min(0).max(10).optional(),
-    delays: z.array(z.number().int().min(0).max(365)).max(10).optional(),
+    delays: z.array(
+        z.number().min(0).max(365).nullable().transform(v => v ?? 2)
+    ).max(10).optional(),
     autoRejectAfterDays: z.number().int().min(0).max(365).optional().nullable(),
     priority: z.string().max(50).optional(),
-    balanced: z.number().min(0).max(1).optional(),
-    startTime: z.string().max(10).optional(),
+    balanced: z.number().min(0).max(100).optional(),
+    startTime: z.string().max(20).optional(),
     timezone: z.string().max(100).optional(),
 });
 
