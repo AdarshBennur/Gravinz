@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Clock } from "lucide-react";
+import { Clock, TrendingUp, Mail, MailCheck, MessageSquareReply, XCircle, Users, Hourglass, ListTodo, ArrowRight } from "lucide-react";
 import { motion, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { Pause, Play, Sparkles } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 
 import AppShell from "@/components/app/app-shell";
@@ -27,11 +27,6 @@ function AnimatedNumber({ value }: { value: number }) {
   return <motion.span data-testid="text-animated-number">{rounded}</motion.span>;
 }
 
-// Normalise a DB timestamp string to explicit UTC.
-// Postgres TIMESTAMP WITHOUT TIME ZONE returns strings like
-// "2026-02-25T10:35:13.75" (no Z). The Date constructor treats
-// those as LOCAL time — causing wrong diffs in IST or any non-UTC zone.
-// Appending Z forces UTC interpretation. Strings already tagged (Z / ±HH:MM) are left alone.
 function normalizeUTC(s: string): string {
   if (/[Zz]$/.test(s) || /[+-]\d{2}:\d{2}$/.test(s)) return s;
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return s + "Z";
@@ -51,13 +46,8 @@ function relativeTime(dateStr: string): string {
   return `${diffD}d`;
 }
 
-/**
- * Computes how many hours + minutes remain until midnight in the given IANA timezone.
- * Uses the same reset boundary as the automation cycle (midnight in user timezone = daily quota resets).
- */
 function computeResetCountdown(timezone: string): string {
   try {
-    // Current wall-clock time in the user's timezone
     const now = new Date();
     const parts = new Intl.DateTimeFormat("en-US", {
       timeZone: timezone,
@@ -67,14 +57,9 @@ function computeResetCountdown(timezone: string): string {
     }).formatToParts(now);
 
     const get = (t: string) => parseInt(parts.find(p => p.type === t)?.value ?? "0", 10);
-    const year = get("year"), month = get("month") - 1, day = get("day");
     const hour = get("hour"), minute = get("minute"), second = get("second");
-
-    // Seconds elapsed since midnight in user TZ
     const elapsedSec = hour * 3600 + minute * 60 + second;
-    // Seconds remaining until next midnight
     const remainSec = 86400 - elapsedSec;
-
     const h = Math.floor(remainSec / 3600);
     const m = Math.floor((remainSec % 3600) / 60);
 
@@ -89,15 +74,13 @@ function computeResetCountdown(timezone: string): string {
 
 function useResetCountdown(timezone: string | undefined): string {
   const [label, setLabel] = useState("");
-
   useEffect(() => {
     if (!timezone) return;
     const tick = () => setLabel(computeResetCountdown(timezone));
-    tick(); // run immediately
-    const id = setInterval(tick, 60_000); // update every minute
+    tick();
+    const id = setInterval(tick, 60_000);
     return () => clearInterval(id);
   }, [timezone]);
-
   return label;
 }
 
@@ -106,7 +89,7 @@ interface DashboardData {
     sentToday: number;
     followupsPending: number;
     replies: number;
-    dailyLimit: number | null; // null = unlimited (owner)
+    dailyLimit: number | null;
     used: number;
   };
   activity: Array<{
@@ -122,24 +105,51 @@ interface DashboardData {
   trialExpired: boolean;
 }
 
+interface MetricsData {
+  followupCount: number;
+  total: { totalSent: number; byFollowup: Record<number, number> };
+  today: { totalSent: number; byFollowup: Record<number, number> };
+  replies: number;
+  rejected: number;
+  replyRate: number;
+  // Intelligence fields
+  funnel: { sent: number; replied: number; rejected: number };
+  averageReplyTimeHours: number | null;
+  activeContacts: number;
+  pendingFirstEmails: number;
+  pendingFollowups: { total: number; byLevel: Record<number, number> };
+}
+
+/** Small breakdown row inside a metric card */
+function BreakdownRow({ label, value, loading }: { label: string; value: number; loading: boolean }) {
+  return (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-medium tabular-nums">
+        {loading ? <Skeleton className="h-3 w-6 inline-block" /> : value}
+      </span>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { toast } = useToast();
-  const [steps, setSteps] = useState<string[]>([
-    "Tighten target roles",
-    "Refresh 2 subject lines",
-    "Queue follow-ups for warm leads",
-  ]);
 
   const { data, isLoading: loading } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
     queryFn: () => apiGet<DashboardData>("/api/dashboard"),
   });
 
-  // Fetch timezone from campaign settings (same source as automation)
+  const { data: metrics, isLoading: metricsLoading } = useQuery<MetricsData>({
+    queryKey: ["/api/dashboard/metrics"],
+    queryFn: () => apiGet<MetricsData>("/api/dashboard/metrics"),
+    staleTime: 60_000,
+  });
+
   const { data: campaignSettings } = useQuery<{ timezone?: string }>({
     queryKey: ["/api/campaign-settings"],
     queryFn: () => apiGet<{ timezone?: string }>("/api/campaign-settings"),
-    staleTime: 5 * 60_000, // re-fetch at most every 5 min
+    staleTime: 5 * 60_000,
   });
 
   const resetLabel = useResetCountdown(campaignSettings?.timezone);
@@ -150,33 +160,36 @@ export default function DashboardPage() {
   const isOwner = data?.isOwner ?? false;
   const trialExpired = data?.trialExpired ?? false;
 
+  const m: MetricsData = metrics ?? {
+    followupCount: 2,
+    total: { totalSent: 0, byFollowup: { 0: 0, 1: 0, 2: 0 } as Record<number, number> },
+    today: { totalSent: 0, byFollowup: { 0: 0, 1: 0, 2: 0 } as Record<number, number> },
+    replies: 0,
+    rejected: 0,
+    replyRate: 0,
+    funnel: { sent: 0, replied: 0, rejected: 0 },
+    averageReplyTimeHours: null,
+    activeContacts: 0,
+    pendingFirstEmails: 0,
+    pendingFollowups: { total: 0, byLevel: {} as Record<number, number> },
+  };
+
+
+  // Number of configured follow-ups (dynamic — 1..N)
+  const followupCount = m.followupCount ?? 2;
+
   const toggleMutation = useMutation({
     mutationFn: () =>
       apiPost(running ? "/api/automation/pause" : "/api/automation/start"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({
-        title: running ? "Automation paused" : "Automation started",
-      });
+      toast({ title: running ? "Automation paused" : "Automation started" });
     },
     onError: (err: Error) => {
       toast({ title: "Error", description: err.message });
     },
   });
 
-  const nextStepsMutation = useMutation({
-    mutationFn: () => apiPost<{ steps: string[] }>("/api/ai/generate-next-steps"),
-    onSuccess: (res) => {
-      setSteps(res.steps);
-      toast({ title: "Generated next steps" });
-    },
-    onError: (err: Error) => {
-      toast({ title: "Error", description: err.message });
-    },
-  });
-
-  // progress: always based on effectiveDailyLimit from server
-  // stats.dailyLimit is null only for owner with zero campaign config — treat as 0% in that case
   const effectiveDailyLimit = stats.dailyLimit ?? 0;
   const progress = effectiveDailyLimit > 0
     ? Math.min(100, Math.round((stats.used / effectiveDailyLimit) * 100))
@@ -197,43 +210,95 @@ export default function DashboardPage() {
             data-testid="button-toggle-automation"
           >
             {running ? (
-              <>
-                <Pause className="mr-2 h-4 w-4" /> Pause
-              </>
+              <><Pause className="mr-2 h-4 w-4" /> Pause</>
             ) : (
-              <>
-                <Play className="mr-2 h-4 w-4" /> Start
-              </>
+              <><Play className="mr-2 h-4 w-4" /> Start</>
             )}
           </Button>
         </div>
       }
     >
+      {/* ── Top KPI row ─────────────────────────────────────────────────────── */}
       <div className="grid gap-4 lg:grid-cols-4">
-        {[{
-          label: "Emails sent today",
-          value: stats.sentToday,
-        }, {
-          label: "Follow-ups pending",
-          value: stats.followupsPending,
-        }, {
-          label: "Replies received",
-          value: stats.replies,
-        }].map((c) => (
-          <Card key={c.label} className="glass p-5" data-testid={`card-kpi-${c.label.replaceAll(" ", "-")}`}>
-            <div className="text-xs text-muted-foreground" data-testid="text-kpi-label">{c.label}</div>
-            <div className="mt-2 text-2xl font-semibold" data-testid="text-kpi-value">
-              {loading ? <Skeleton className="h-7 w-14" /> : <AnimatedNumber value={c.value} />}
-            </div>
-          </Card>
-        ))}
 
-        {/* Daily limit card — progress bar always visible unless trial expired */}
+        {/* Card 1 — Total Emails Sent (all-time) */}
+        <Card className="glass p-5" data-testid="card-kpi-total-sent">
+          <div className="flex items-center gap-2">
+            <Mail className="h-4 w-4 text-muted-foreground" />
+            <div className="text-xs text-muted-foreground">Total emails sent</div>
+          </div>
+          <div className="mt-2 text-2xl font-semibold" data-testid="text-kpi-total-sent">
+            {metricsLoading ? <Skeleton className="h-7 w-14" /> : <AnimatedNumber value={m.total.totalSent} />}
+          </div>
+          <div className="mt-3 space-y-1.5 border-t pt-3">
+            <BreakdownRow label="First email" value={m.total.byFollowup[0] ?? 0} loading={metricsLoading} />
+            {Array.from({ length: followupCount }, (_, i) => (
+              <BreakdownRow
+                key={i + 1}
+                label={`Follow-up ${i + 1}`}
+                value={m.total.byFollowup[i + 1] ?? 0}
+                loading={metricsLoading}
+              />
+            ))}
+          </div>
+        </Card>
+
+        {/* Card 2 — Emails Sent Today */}
+        <Card className="glass p-5" data-testid="card-kpi-today-sent">
+          <div className="flex items-center gap-2">
+            <MailCheck className="h-4 w-4 text-muted-foreground" />
+            <div className="text-xs text-muted-foreground">Emails sent today</div>
+          </div>
+          <div className="mt-2 text-2xl font-semibold" data-testid="text-kpi-today-sent">
+            {metricsLoading ? <Skeleton className="h-7 w-14" /> : <AnimatedNumber value={m.today.totalSent} />}
+          </div>
+          <div className="mt-3 space-y-1.5 border-t pt-3">
+            <BreakdownRow label="First email" value={m.today.byFollowup[0] ?? 0} loading={metricsLoading} />
+            {Array.from({ length: followupCount }, (_, i) => (
+              <BreakdownRow
+                key={i + 1}
+                label={`Follow-up ${i + 1}`}
+                value={m.today.byFollowup[i + 1] ?? 0}
+                loading={metricsLoading}
+              />
+            ))}
+          </div>
+        </Card>
+
+        {/* Card 3 — Replies & Rejected */}
+        <Card className="glass p-5" data-testid="card-kpi-replies">
+          <div className="flex items-center gap-2">
+            <MessageSquareReply className="h-4 w-4 text-muted-foreground" />
+            <div className="text-xs text-muted-foreground">Replies & rejected</div>
+          </div>
+          <div className="mt-2 text-2xl font-semibold" data-testid="text-kpi-replies">
+            {metricsLoading ? <Skeleton className="h-7 w-14" /> : <AnimatedNumber value={m.replies} />}
+          </div>
+          <div className="mt-3 space-y-1.5 border-t pt-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <XCircle className="h-3 w-3" /> Rejected
+              </span>
+              <span className="font-medium tabular-nums">
+                {metricsLoading ? <Skeleton className="h-3 w-6 inline-block" /> : m.rejected}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-muted-foreground flex items-center gap-1">
+                <TrendingUp className="h-3 w-3" /> Reply rate
+              </span>
+              <span className="font-medium tabular-nums">
+                {metricsLoading ? <Skeleton className="h-3 w-8 inline-block" /> : `${m.replyRate}%`}
+              </span>
+            </div>
+          </div>
+        </Card>
+
+        {/* Card 4 — Daily Limit Progress (UNTOUCHED) */}
         <Card className="glass p-5" data-testid="card-kpi-limit">
           {loading ? (
             <Skeleton className="h-20 w-full rounded-xl" />
           ) : trialExpired ? (
-            /* ── Free: trial expired — no bar, sending disabled ── */
             <div className="flex h-full flex-col justify-between" data-testid="div-trial-expired">
               <div className="text-xs text-muted-foreground">Daily limit</div>
               <div className="mt-2 flex items-center gap-2">
@@ -249,7 +314,6 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            /* ── Progress bar — shown for owner AND active free ── */
             <>
               <div className="flex items-center justify-between">
                 <div className="text-xs text-muted-foreground" data-testid="text-limit-label">
@@ -289,8 +353,130 @@ export default function DashboardPage() {
         </Card>
       </div>
 
+      {/* ── Intelligence Row ─────────────────────────────────────────────── */}
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
-        <Card className="glass p-6 lg:col-span-2" data-testid="card-activity">
+
+        {/* Card A — Conversion Funnel */}
+        <Card className="glass p-5" data-testid="card-funnel">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <div className="text-xs text-muted-foreground">Conversion funnel</div>
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-2">
+            {[
+              { label: "Sent", value: m.funnel?.sent ?? m.total.totalSent, color: "text-primary" },
+              { label: "Replied", value: m.funnel?.replied ?? m.replies, color: "text-green-500" },
+              { label: "Rejected", value: m.funnel?.rejected ?? m.rejected, color: "text-destructive" },
+            ].map((step, idx, arr) => (
+              <div key={step.label} className="flex items-center gap-2">
+                <div className="text-center">
+                  <div className={`text-xl font-semibold tabular-nums ${step.color}`}>
+                    {metricsLoading ? <Skeleton className="h-6 w-10" /> : <AnimatedNumber value={step.value} />}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{step.label}</div>
+                </div>
+                {idx < arr.length - 1 && <ArrowRight className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />}
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 border-t pt-3 flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">Reply rate</span>
+            <span className="font-semibold text-green-500">
+              {metricsLoading ? <Skeleton className="h-3 w-8 inline-block" /> : `${m.replyRate}%`}
+            </span>
+          </div>
+        </Card>
+
+        {/* Card B — Reply Intelligence */}
+        <Card className="glass p-5" data-testid="card-reply-intelligence">
+          <div className="flex items-center gap-2">
+            <Hourglass className="h-4 w-4 text-muted-foreground" />
+            <div className="text-xs text-muted-foreground">Reply intelligence</div>
+          </div>
+          <div className="mt-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs text-muted-foreground">Avg reply time</div>
+                <div className="text-2xl font-semibold mt-0.5 tabular-nums" data-testid="text-avg-reply-time">
+                  {metricsLoading ? (
+                    <Skeleton className="h-7 w-20" />
+                  ) : m.averageReplyTimeHours === null ? (
+                    <span className="text-muted-foreground text-sm">No replies yet</span>
+                  ) : m.averageReplyTimeHours < 1 ? (
+                    `${Math.round(m.averageReplyTimeHours * 60)}m`
+                  ) : (
+                    `${m.averageReplyTimeHours}h`
+                  )}
+                </div>
+              </div>
+              <MessageSquareReply className="h-8 w-8 text-muted-foreground/20" />
+            </div>
+            <div className="border-t pt-3 space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Replies received</span>
+                <span className="font-medium tabular-nums">
+                  {metricsLoading ? <Skeleton className="h-3 w-6 inline-block" /> : m.replies}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Rejected</span>
+                <span className="font-medium tabular-nums text-destructive">
+                  {metricsLoading ? <Skeleton className="h-3 w-6 inline-block" /> : m.rejected}
+                </span>
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Card C — Pipeline Status */}
+        <Card className="glass p-5" data-testid="card-pipeline">
+          <div className="flex items-center gap-2">
+            <ListTodo className="h-4 w-4 text-muted-foreground" />
+            <div className="text-xs text-muted-foreground">Pipeline status</div>
+          </div>
+          <div className="mt-3 space-y-2">
+            {/* Active contacts */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5 text-sm">
+                <Users className="h-3.5 w-3.5 text-primary" />
+                <span>Active contacts</span>
+              </div>
+              <span className="font-semibold tabular-nums text-primary" data-testid="text-active-contacts">
+                {metricsLoading ? <Skeleton className="h-4 w-8 inline-block" /> : <AnimatedNumber value={m.activeContacts ?? 0} />}
+              </span>
+            </div>
+
+            {/* Pending first emails */}
+            <div className="flex items-center justify-between text-xs border-t pt-2">
+              <span className="text-muted-foreground">Pending first email</span>
+              <span className="font-medium tabular-nums">
+                {metricsLoading ? <Skeleton className="h-3 w-6 inline-block" /> : m.pendingFirstEmails ?? 0}
+              </span>
+            </div>
+
+            {/* Pending follow-ups — dynamic 1..N */}
+            {followupCount > 0 && (
+              <>
+                <div className="text-xs text-muted-foreground border-t pt-2">Pending follow-ups</div>
+                {Array.from({ length: followupCount }, (_, i) => (
+                  <div key={i + 1} className="flex items-center justify-between text-xs pl-2">
+                    <span className="text-muted-foreground">Follow-up {i + 1}</span>
+                    <span className="font-medium tabular-nums">
+                      {metricsLoading
+                        ? <Skeleton className="h-3 w-5 inline-block" />
+                        : m.pendingFollowups?.byLevel[i + 1] ?? 0}
+                    </span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* ── Bottom row — Recent Activity (full width, Today's Focus removed) ── */}
+      <div className="mt-6">
+        <Card className="glass p-6" data-testid="card-activity">
           <div className="flex items-center justify-between">
             <div>
               <div className="text-sm font-semibold" data-testid="text-activity-title">Recent activity</div>
@@ -340,41 +526,6 @@ export default function DashboardPage() {
               </TableBody>
             </Table>
           </div>
-        </Card>
-
-        <Card className="glass p-6" data-testid="card-insights">
-          <div className="flex items-center gap-2">
-            <div className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground" data-testid="badge-insights">
-              <Sparkles className="h-4 w-4" />
-            </div>
-            <div>
-              <div className="text-sm font-semibold" data-testid="text-insights-title">Today's focus</div>
-              <div className="text-xs text-muted-foreground" data-testid="text-insights-sub">
-                Keep reply rate high
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-5 space-y-3 text-sm">
-            {steps.map((t, idx) => (
-              <div key={idx} className="flex items-center justify-between rounded-xl border bg-background/60 px-3 py-2" data-testid={`row-insight-${idx}`}>
-                <div className="text-muted-foreground" data-testid="text-insight">{t}</div>
-                <Badge variant="secondary" className="rounded-full" data-testid={`badge-insight-${idx}`}>
-                  AI
-                </Badge>
-              </div>
-            ))}
-          </div>
-
-          <Button
-            variant="secondary"
-            className="mt-5 w-full"
-            disabled={nextStepsMutation.isPending}
-            onClick={() => nextStepsMutation.mutate()}
-            data-testid="button-generate-next-steps"
-          >
-            {nextStepsMutation.isPending ? "Generating…" : "Generate next steps"}
-          </Button>
         </Card>
       </div>
     </AppShell>
