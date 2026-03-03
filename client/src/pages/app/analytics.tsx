@@ -32,7 +32,7 @@ export default function AnalyticsPage() {
   ];
 
   return (
-    <AppShell title="Analytics" subtitle="Trends, reply rate, and subject performance.">
+    <AppShell title="Analytics">
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="glass p-6" data-testid="card-reply-rate">
           <div className="text-xs text-muted-foreground" data-testid="text-reply-rate-label">Reply rate</div>

@@ -117,7 +117,7 @@ export default function CampaignSettingsPage() {
 
   if (isLoading) {
     return (
-      <AppShell title="Campaign settings" subtitle="Tune daily limits, follow-up cadence, and prioritization.">
+      <AppShell title="Campaign settings">
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="glass p-6 lg:col-span-2">
             <div className="space-y-4">
@@ -137,7 +137,6 @@ export default function CampaignSettingsPage() {
   return (
     <AppShell
       title="Campaign settings"
-      subtitle="Tune daily limits, follow-up cadence, and prioritization."
       headerRight={
         <Badge
           variant={automationStatus === "running" ? "default" : "secondary"}

@@ -70,7 +70,7 @@ export default function ProfilePage() {
 
   if (isLoading) {
     return (
-      <AppShell title="Profile" subtitle="View your professional profile as the AI sees it.">
+      <AppShell title="Profile">
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-1 space-y-6">
             <Card className="glass p-6">
@@ -92,7 +92,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <AppShell title="Profile" subtitle="View your professional profile as the AI sees it.">
+    <AppShell title="Profile">
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-1 space-y-6">
           <Card className="glass p-6 text-center" data-testid="card-profile-header">

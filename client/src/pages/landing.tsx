@@ -31,13 +31,8 @@ export default function LandingPage() {
               >
                 <Sparkles className="h-4 w-4" strokeWidth={2.2} />
               </div>
-              <div className="leading-tight">
-                <div className="text-sm font-semibold" data-testid="text-brand">
-                  OutboundAI
-                </div>
-                <div className="text-xs text-muted-foreground" data-testid="text-brand-sub">
-                  Cold email automation
-                </div>
+              <div className="text-sm font-semibold" data-testid="text-brand">
+                OutboundAI
               </div>
             </Link>
 
