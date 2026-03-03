@@ -162,7 +162,7 @@ export default function IntegrationsPage() {
 
   if (isLoading) {
     return (
-      <AppShell title="Integrations" subtitle="Connect the tools your workflow already lives in.">
+      <AppShell title="Integrations">
         <div className="grid gap-4 lg:grid-cols-2">
           <Card className="glass p-6"><Skeleton className="h-40 w-full" /></Card>
           <Card className="glass p-6"><Skeleton className="h-40 w-full" /></Card>
@@ -172,7 +172,7 @@ export default function IntegrationsPage() {
   }
 
   return (
-    <AppShell title="Integrations" subtitle="Connect the tools your workflow already lives in.">
+    <AppShell title="Integrations">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="glass p-6" data-testid="card-gmail">
           <div className="flex items-start justify-between gap-4">

@@ -227,9 +227,8 @@ export default function InboxPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/contacts"] });
       toast({
         title: "Notion Sync Complete",
-        description: `Synced ${result.imported ?? 0} contacts${
-          result.skipped ? `, ${result.skipped} skipped` : ""
-        }`,
+        description: `Synced ${result.imported ?? 0} contacts${result.skipped ? `, ${result.skipped} skipped` : ""
+          }`,
       });
     },
     onError: (err: Error) =>
@@ -261,7 +260,7 @@ export default function InboxPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AppShell title="Inbox" subtitle="View conversations, track opens, and manage replies.">
+      <AppShell title="Inbox">
         <div className="flex h-[calc(100vh-6rem)] overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
           {/* =======================================================
                LAYOUT TIERS:
@@ -271,11 +270,10 @@ export default function InboxPage() {
           ======================================================= */}
 
           {/* LEFT SIDEBAR */}
-          <div className={`flex flex-col border-r shrink-0 ${
-            mobileView === "list"
+          <div className={`flex flex-col border-r shrink-0 ${mobileView === "list"
               ? "w-full md:w-[36%] md:max-w-[280px] lg:w-[280px]"
               : "hidden md:flex md:w-[36%] md:max-w-[280px] lg:w-[280px]"
-          }`}>
+            }`}>
             <div className="p-3 border-b space-y-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -297,9 +295,8 @@ export default function InboxPage() {
                   data-testid="button-sync-notion-inbox"
                 >
                   <RotateCcw
-                    className={`mr-1.5 h-3.5 w-3.5 ${
-                      syncFromNotion.isPending ? "animate-spin" : ""
-                    }`}
+                    className={`mr-1.5 h-3.5 w-3.5 ${syncFromNotion.isPending ? "animate-spin" : ""
+                      }`}
                   />
                   {syncFromNotion.isPending ? "Syncing..." : "Sync Notion"}
                 </Button>
@@ -389,9 +386,8 @@ export default function InboxPage() {
 
           {/* MIDDLE PANEL - Conversation Thread */}
           {/* Mobile: show only when mobileView=conversation. Tablet+Desktop: always show */}
-          <div className={`flex-col min-w-0 min-h-0 border-r flex-1 ${
-            mobileView === "conversation" ? "flex" : "hidden md:flex"
-          }`}>
+          <div className={`flex-col min-w-0 min-h-0 border-r flex-1 ${mobileView === "conversation" ? "flex" : "hidden md:flex"
+            }`}>
             {!activeContactId ? (
               <div className="flex-1 grid place-items-center text-muted-foreground text-sm">
                 Select a contact to view conversation

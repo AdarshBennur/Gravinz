@@ -286,7 +286,7 @@ export default function ProfileSettingsPage() {
 
   if (isLoading) {
     return (
-      <AppShell title="Profile & AI Settings" subtitle="Give the AI context so it can write in your voice.">
+      <AppShell title="Profile & AI Settings">
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="lg:col-span-2 space-y-6">
             <Card className="glass p-6">
@@ -308,7 +308,7 @@ export default function ProfileSettingsPage() {
   }
 
   return (
-    <AppShell title="Profile & AI Settings" subtitle="Give the AI context so it can write in your voice.">
+    <AppShell title="Profile & AI Settings">
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
           <Card className="glass p-6" data-testid="card-profile">

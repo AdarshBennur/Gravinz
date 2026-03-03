@@ -198,7 +198,6 @@ export default function DashboardPage() {
   return (
     <AppShell
       title="Dashboard"
-      subtitle="Monitor daily sending, replies, and automation health."
       headerRight={
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="rounded-full" data-testid="status-automation-badge">
