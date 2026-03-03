@@ -474,33 +474,45 @@ export default function AppShell({
             {fullHeight ? (
               /* ── Flush viewport-locked layout (Inbox) ── */
               <main className="flex flex-1 flex-col overflow-hidden min-h-0">
-                {/* Mobile: clear the floating hamburger */}
-                <div className="shrink-0 lg:hidden" style={{ height: "2.5rem" }} />
+                {/* Mobile: clear the floating hamburger — identical to standard */}
+                <div className="shrink-0 mb-4 lg:hidden" style={{ height: "2.5rem" }} />
 
-                {/* Slim title strip */}
-                <div className="shrink-0 flex items-center justify-between gap-4 px-4 pt-4 pb-3 sm:px-6 lg:px-8">
-                  <div className="flex items-center gap-3">
-                    {PageIcon && (
-                      <PageIcon
-                        className="h-6 w-6 shrink-0 text-muted-foreground"
-                        strokeWidth={2}
-                        data-testid="icon-page-title"
-                      />
-                    )}
-                    <h1
-                      className="text-2xl font-semibold tracking-tight"
-                      data-testid="text-page-title"
-                    >
-                      {title}
-                    </h1>
+                {/* Title — same padding, same wrapper structure as standard layout */}
+                <div className="shrink-0 px-4 pt-8 sm:px-6 lg:px-8">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-3">
+                        {PageIcon && (
+                          <PageIcon
+                            className="h-6 w-6 shrink-0 text-muted-foreground"
+                            strokeWidth={2}
+                            data-testid="icon-page-title"
+                          />
+                        )}
+                        <h1
+                          className="text-2xl font-semibold tracking-tight"
+                          data-testid="text-page-title"
+                        >
+                          {title}
+                        </h1>
+                      </div>
+                      {subtitle ? (
+                        <p
+                          className="mt-1 text-sm text-muted-foreground"
+                          data-testid="text-page-subtitle"
+                        >
+                          {subtitle}
+                        </p>
+                      ) : null}
+                    </div>
+                    {headerRight ? (
+                      <div data-testid="slot-header-right">{headerRight}</div>
+                    ) : null}
                   </div>
-                  {headerRight ? (
-                    <div data-testid="slot-header-right">{headerRight}</div>
-                  ) : null}
                 </div>
 
-                {/* Children fill remaining height */}
-                <div className="flex-1 overflow-hidden min-h-0 px-4 pb-4 sm:px-6 lg:px-8">
+                {/* Children fill remaining height — mt-6 gap matches standard layout */}
+                <div className="flex-1 overflow-hidden min-h-0 px-4 mt-6 pb-4 sm:px-6 lg:px-8">
                   {children}
                 </div>
               </main>
