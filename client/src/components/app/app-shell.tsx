@@ -115,53 +115,6 @@ function NavLinks({
   );
 }
 
-/* ──────────────────────────────── ThemeToggle ──────────────────────────── */
-
-function ThemeToggle({ collapsed }: { collapsed?: boolean }) {
-  const { setTheme } = useTheme();
-
-  const button = (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-9 w-9 shrink-0 rounded-xl"
-      data-testid="button-theme-toggle"
-    >
-      <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-      <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
-      <span className="sr-only">Toggle theme</span>
-    </Button>
-  );
-
-  return (
-    <DropdownMenu>
-      {/* Correct nesting: Tooltip > TooltipTrigger > DropdownMenuTrigger > Button.
-          This ensures the real button element gets both tooltip & dropdown handlers. */}
-      {collapsed ? (
-        <Tooltip delayDuration={100}>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="right">Toggle theme</TooltipContent>
-        </Tooltip>
-      ) : (
-        <DropdownMenuTrigger asChild>{button}</DropdownMenuTrigger>
-      )}
-      <DropdownMenuContent align="end" side="top">
-        <DropdownMenuItem onClick={() => setTheme("light")}>
-          <Sun className="mr-2 h-4 w-4" /> Light
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("dark")}>
-          <Moon className="mr-2 h-4 w-4" /> Dark
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => setTheme("system")}>
-          <Monitor className="mr-2 h-4 w-4" /> System
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 /* ──────────────────────────────── SidebarBottom ───────────────────────── */
 
 function SidebarBottom({
@@ -173,6 +126,7 @@ function SidebarBottom({
 }) {
   const [, setLocation] = useLocation();
   const { user, logout } = useAuth();
+  const { setTheme } = useTheme();
 
   const handleLogout = async () => {
     await logout();
@@ -184,8 +138,7 @@ function SidebarBottom({
     onNavigate?.();
   };
 
-  // Two separate button shapes: icon-only (collapsed) vs full-width row (expanded).
-  // Collapsed uses h-9 w-9 to exactly match nav icon and theme toggle button sizing.
+  // Icon-only button for collapsed sidebar
   const collapsedAvatarBtn = (
     <Button
       variant="ghost"
@@ -201,10 +154,11 @@ function SidebarBottom({
     </Button>
   );
 
+  // Full-width row button for expanded sidebar
   const expandedAvatarBtn = (
     <Button
       variant="ghost"
-      className="h-auto flex-1 justify-start gap-2 rounded-xl px-2 py-2"
+      className="h-auto w-full justify-start gap-2 rounded-xl px-2 py-2"
       data-testid="button-user-menu"
     >
       <Avatar className="h-7 w-7 shrink-0" data-testid="img-avatar">
@@ -228,15 +182,9 @@ function SidebarBottom({
         (collapsed ? "px-2" : "px-4")
       }
     >
-      {/* Collapsed: stack vertically — theme on top, profile at bottom */}
-      {/* Expanded:  row          — profile flex-1, theme toggle at right */}
-      <div className={collapsed ? "flex flex-col items-center gap-2" : "flex items-center gap-2"}>
-        {/* Theme toggle — above profile when collapsed */}
-        <ThemeToggle collapsed={collapsed} />
-
-        {/* Profile dropdown — always the bottom-most element */}
+      <div className={collapsed ? "flex flex-col items-center" : "flex items-center"}>
+        {/* Profile dropdown — the only element at this level */}
         <DropdownMenu>
-          {/* Correct nesting: Tooltip > TooltipTrigger > DropdownMenuTrigger > Button */}
           {collapsed ? (
             <Tooltip delayDuration={100}>
               <TooltipTrigger asChild>
@@ -249,24 +197,49 @@ function SidebarBottom({
           ) : (
             <DropdownMenuTrigger asChild>{expandedAvatarBtn}</DropdownMenuTrigger>
           )}
-          <DropdownMenuContent side="top" align="start" className="w-48">
+
+          <DropdownMenuContent side="top" align="start" className="w-52">
+            {/* User identity */}
             <DropdownMenuLabel data-testid="text-user-menu-label">
               {user?.fullName || user?.username || "My Account"}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
+
+            {/* Navigation */}
             <DropdownMenuItem
               onClick={() => handleNavigate("/app/profile")}
               data-testid="menu-profile"
             >
+              <User className="mr-2 h-4 w-4" />
               Profile
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => handleNavigate("/app/settings")}
               data-testid="menu-settings"
             >
+              <Settings className="mr-2 h-4 w-4" />
               Settings
             </DropdownMenuItem>
+
             <DropdownMenuSeparator />
+
+            {/* Theme switcher — moved from sidebar row into dropdown */}
+            <DropdownMenuLabel className="text-xs text-muted-foreground font-normal pb-1">
+              Theme
+            </DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => setTheme("light")} data-testid="menu-theme-light">
+              <Sun className="mr-2 h-4 w-4" /> Light
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTheme("dark")} data-testid="menu-theme-dark">
+              <Moon className="mr-2 h-4 w-4" /> Dark
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setTheme("system")} data-testid="menu-theme-system">
+              <Monitor className="mr-2 h-4 w-4" /> System
+            </DropdownMenuItem>
+
+            <DropdownMenuSeparator />
+
+            {/* Logout */}
             <DropdownMenuItem onClick={handleLogout} data-testid="menu-logout">
               <LogOut className="mr-2 h-4 w-4" />
               Log out
