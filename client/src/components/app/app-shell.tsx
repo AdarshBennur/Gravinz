@@ -21,7 +21,7 @@ import { useAuth } from "@/hooks/use-auth";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetClose, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -417,19 +417,25 @@ export default function AppShell({
                 <SheetContent side="left" className="flex w-[280px] flex-col bg-sidebar p-0">
                   {/* Scrollable nav */}
                   <div className="flex-1 overflow-y-auto px-4 py-5">
-                    <div className="flex items-center gap-2" data-testid="mobile-brand">
-                      <div
-                        className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground"
-                        data-testid="badge-mobile-logo"
+                    <SheetClose asChild>
+                      <Link
+                        href="/"
+                        className="flex items-center gap-2"
+                        data-testid="mobile-brand"
                       >
-                        <span className="text-sm font-semibold">OA</span>
-                      </div>
-                      <div className="leading-tight">
-                        <div className="text-sm font-semibold" data-testid="text-mobile-brand">
-                          GravinzAI
+                        <div
+                          className="grid size-9 place-items-center rounded-xl bg-primary text-primary-foreground"
+                          data-testid="badge-mobile-logo"
+                        >
+                          <span className="text-sm font-semibold">OA</span>
                         </div>
-                      </div>
-                    </div>
+                        <div className="leading-tight">
+                          <div className="text-sm font-semibold" data-testid="text-mobile-brand">
+                            GravinzAI
+                          </div>
+                        </div>
+                      </Link>
+                    </SheetClose>
                     <Separator className="my-4" />
                     {/* Mobile always expanded — no collapsed prop */}
                     <NavLinks />
