@@ -59,6 +59,32 @@ How data moves between external services and local analytics.
 
 ![System Architecture](docs/architecture/system-architecture.png)
 
+```
+┌─────────────────────────────┐
+│         Client              │
+│  React 19 + Vite + Tailwind │
+│  TanStack Query · Wouter    │
+└────────────┬────────────────┘
+             │ HTTP / REST
+┌────────────▼────────────────┐
+│         Server              │
+│  Node.js + Express 5        │
+│  Zod Validation             │
+│  JWT Auth                   │
+│  node-cron Scheduler        │
+└──┬──────┬──────┬────────────┘
+   │      │      │
+   ▼      ▼      ▼
+OpenAI  Gmail  Notion
+ API     API    API
+   │
+   ▼
+┌─────────────────────────────┐
+│  Supabase (PostgreSQL)      │
+│  Auth · Storage · DB        │
+└─────────────────────────────┘
+```
+
 ### Frontend
 
 - **Framework:** React 19 with Vite 7
