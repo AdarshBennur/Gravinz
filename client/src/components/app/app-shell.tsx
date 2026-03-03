@@ -312,7 +312,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
               }
             >
               <div className="text-sm font-semibold" data-testid="text-app-brand">
-                OutboundAI
+                GravinzAI
               </div>
             </div>
           </Link>
@@ -397,11 +397,14 @@ export default function AppShell({
   subtitle,
   children,
   headerRight,
+  fullHeight = false,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
   headerRight?: React.ReactNode;
+  /** Lock the shell to viewport height; internal panels scroll independently */
+  fullHeight?: boolean;
 }) {
   const [location] = useLocation();
   const PageIcon = pageIcons[location];
@@ -425,13 +428,13 @@ export default function AppShell({
 
   return (
     <TooltipProvider>
-      <div className="min-h-dvh">
-        <div className="flex">
+      <div className={fullHeight ? "h-dvh overflow-hidden flex" : "min-h-dvh"}>
+        <div className={fullHeight ? "contents" : "flex"}>
           {/* ── Desktop sidebar ── */}
           <Sidebar collapsed={collapsed} onToggle={toggleCollapsed} />
 
           {/* ── Page content ── */}
-          <div className="min-w-0 flex-1">
+          <div className={fullHeight ? "min-w-0 flex-1 flex flex-col overflow-hidden" : "min-w-0 flex-1"}>
             {/* Mobile hamburger — floating, no height impact on layout */}
             <div className="fixed left-3 top-3 z-30 lg:hidden">
               <Sheet>
@@ -453,7 +456,7 @@ export default function AppShell({
                       </div>
                       <div className="leading-tight">
                         <div className="text-sm font-semibold" data-testid="text-mobile-brand">
-                          OutboundAI
+                          GravinzAI
                         </div>
                       </div>
                     </div>
@@ -468,13 +471,14 @@ export default function AppShell({
               </Sheet>
             </div>
 
-            <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-              {/* Small top padding on mobile to clear the floating menu button */}
-              <div className="mb-4 lg:hidden" style={{ height: "2.5rem" }} />
+            {fullHeight ? (
+              /* ── Flush viewport-locked layout (Inbox) ── */
+              <main className="flex flex-1 flex-col overflow-hidden min-h-0">
+                {/* Mobile: clear the floating hamburger */}
+                <div className="shrink-0 lg:hidden" style={{ height: "2.5rem" }} />
 
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  {/* Icon + title row — icon derived from nav pageIcons map */}
+                {/* Slim title strip */}
+                <div className="shrink-0 flex items-center justify-between gap-4 px-4 pt-4 pb-3 sm:px-6 lg:px-8">
                   <div className="flex items-center gap-3">
                     {PageIcon && (
                       <PageIcon
@@ -490,22 +494,57 @@ export default function AppShell({
                       {title}
                     </h1>
                   </div>
-                  {subtitle ? (
-                    <p
-                      className="mt-1 text-sm text-muted-foreground"
-                      data-testid="text-page-subtitle"
-                    >
-                      {subtitle}
-                    </p>
+                  {headerRight ? (
+                    <div data-testid="slot-header-right">{headerRight}</div>
                   ) : null}
                 </div>
-                {headerRight ? (
-                  <div data-testid="slot-header-right">{headerRight}</div>
-                ) : null}
-              </div>
 
-              <div className="mt-6">{children}</div>
-            </main>
+                {/* Children fill remaining height */}
+                <div className="flex-1 overflow-hidden min-h-0 px-4 pb-4 sm:px-6 lg:px-8">
+                  {children}
+                </div>
+              </main>
+            ) : (
+              /* ── Standard padded layout (all other pages) ── */
+              <main className="mx-auto w-full max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+                {/* Small top padding on mobile to clear the floating menu button */}
+                <div className="mb-4 lg:hidden" style={{ height: "2.5rem" }} />
+
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    {/* Icon + title row — icon derived from nav pageIcons map */}
+                    <div className="flex items-center gap-3">
+                      {PageIcon && (
+                        <PageIcon
+                          className="h-6 w-6 shrink-0 text-muted-foreground"
+                          strokeWidth={2}
+                          data-testid="icon-page-title"
+                        />
+                      )}
+                      <h1
+                        className="text-2xl font-semibold tracking-tight"
+                        data-testid="text-page-title"
+                      >
+                        {title}
+                      </h1>
+                    </div>
+                    {subtitle ? (
+                      <p
+                        className="mt-1 text-sm text-muted-foreground"
+                        data-testid="text-page-subtitle"
+                      >
+                        {subtitle}
+                      </p>
+                    ) : null}
+                  </div>
+                  {headerRight ? (
+                    <div data-testid="slot-header-right">{headerRight}</div>
+                  ) : null}
+                </div>
+
+                <div className="mt-6">{children}</div>
+              </main>
+            )}
           </div>
         </div>
       </div>

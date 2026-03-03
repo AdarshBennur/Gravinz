@@ -260,8 +260,8 @@ export default function InboxPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AppShell title="Inbox">
-        <div className="flex h-[calc(100vh-6rem)] overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
+      <AppShell title="Inbox" fullHeight>
+        <div className="flex h-full overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
           {/* =======================================================
                LAYOUT TIERS:
                Mobile  (< md  / < 768px) : single panel, mobileView state controls which
@@ -271,8 +271,8 @@ export default function InboxPage() {
 
           {/* LEFT SIDEBAR */}
           <div className={`flex flex-col border-r shrink-0 ${mobileView === "list"
-              ? "w-full md:w-[36%] md:max-w-[280px] lg:w-[280px]"
-              : "hidden md:flex md:w-[36%] md:max-w-[280px] lg:w-[280px]"
+            ? "w-full md:w-[36%] md:max-w-[280px] lg:w-[280px]"
+            : "hidden md:flex md:w-[36%] md:max-w-[280px] lg:w-[280px]"
             }`}>
             <div className="p-3 border-b space-y-2">
               <div className="relative">
