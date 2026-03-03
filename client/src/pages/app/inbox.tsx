@@ -263,12 +263,18 @@ export default function InboxPage() {
 
       <AppShell title="Inbox" subtitle="View conversations, track opens, and manage replies.">
         <div className="flex h-[calc(100vh-6rem)] overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
-          {/* LEFT SIDEBAR - Contact List */}
-          {/* Mobile: show only when mobileView === 'list'. Desktop: always show at fixed width */}
+          {/* =======================================================
+               LAYOUT TIERS:
+               Mobile  (< md  / < 768px) : single panel, mobileView state controls which
+               Tablet  (md–lg / 768–1023px): 2 columns — sidebar 36% | conversation flex-1
+               Desktop (>= lg / >= 1024px): 3 columns — sidebar fixed | conv | details
+          ======================================================= */}
+
+          {/* LEFT SIDEBAR */}
           <div className={`flex flex-col border-r shrink-0 ${
             mobileView === "list"
-              ? "w-full md:w-[320px]"
-              : "hidden md:flex md:w-[320px]"
+              ? "w-full md:w-[36%] md:max-w-[280px] lg:w-[280px]"
+              : "hidden md:flex md:w-[36%] md:max-w-[280px] lg:w-[280px]"
           }`}>
             <div className="p-3 border-b space-y-2">
               <div className="relative">
@@ -382,7 +388,7 @@ export default function InboxPage() {
           </div>
 
           {/* MIDDLE PANEL - Conversation Thread */}
-          {/* Mobile: show only when mobileView === 'conversation'. Desktop: always show */}
+          {/* Mobile: show only when mobileView=conversation. Tablet+Desktop: always show */}
           <div className={`flex-col min-w-0 min-h-0 border-r flex-1 ${
             mobileView === "conversation" ? "flex" : "hidden md:flex"
           }`}>
@@ -421,7 +427,7 @@ export default function InboxPage() {
                   {/* Thread header */}
                   <div className="p-4 border-b flex items-center justify-between shrink-0">
                     <div className="flex items-center gap-3 min-w-0">
-                      {/* Mobile-only back button */}
+                      {/* Mobile-only back button — hidden at md+ where both panels coexist */}
                       <button
                         className="md:hidden shrink-0 p-1 rounded-lg hover:bg-muted transition-colors"
                         onClick={() => setMobileView("list")}
@@ -443,7 +449,7 @@ export default function InboxPage() {
                       <Badge variant={statusVariant[detail.contact.status] || "secondary"} className="rounded-full">
                         {detail.contact.status || "—"}
                       </Badge>
-                      {/* Mobile-only info button — opens details drawer */}
+                      {/* Info button: visible on mobile + tablet, hidden on desktop (lg) where details panel is permanent */}
                       <button
                         className="lg:hidden p-1.5 rounded-lg hover:bg-muted transition-colors"
                         onClick={() => setShowMobileDetails(true)}
