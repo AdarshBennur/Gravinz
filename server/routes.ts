@@ -1958,7 +1958,14 @@ export async function registerRoutes(
       }
 
       const { sendEmail } = await import("./services/gmail");
-      const result = await sendEmail(userId, toEmail, `[TEST] ${subject}`, body, undefined, undefined, attachments);
+      const { randomUUID } = await import("crypto");
+
+      // Generate a tracking ID so links in the test email go through /track/click.
+      // We intentionally do NOT create an email_sends row here (contact_id FK is NOT NULL).
+      // Clicks on test emails will redirect correctly but won't be counted \u2014 acceptable for tests.
+      const testEmailSendId = randomUUID();
+
+      const result = await sendEmail(userId, toEmail, `[TEST] ${subject}`, body, undefined, undefined, attachments, testEmailSendId);
 
       // ⚠️ Intentionally NO writes to:
       //   - email_sends table

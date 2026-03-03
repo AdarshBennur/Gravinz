@@ -253,11 +253,19 @@ export async function sendEmail(
       : fromEmail;
     // fromHeader intentionally not logged — contains PII
 
-    // Rewrite links for click tracking if emailSendId is provided
+    // Rewrite links for click tracking if emailSendId is provided.
+    // Base URL resolution priority:
+    //   1. RENDER_EXTERNAL_URL  — auto-set by Render on all deployed services (no config needed)
+    //   2. BASE_URL             — explicit override in .env or Render env vars
+    //   3. localhost fallback   — local dev only
     let trackedBody = body;
     if (emailSendId) {
-      const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5001}`;
+      const baseUrl =
+        process.env.RENDER_EXTERNAL_URL ||
+        process.env.BASE_URL ||
+        `http://localhost:${process.env.PORT || 5001}`;
       trackedBody = rewriteLinksForTracking(body, emailSendId, userId, baseUrl);
+      console.log(`[Gmail] Link tracking active — baseUrl: ${baseUrl}, emailSendId: ${emailSendId}`);
     }
 
     const raw = createRawEmail(to, fromHeader, subject, trackedBody, threadId, inReplyToMessageId, attachments);
