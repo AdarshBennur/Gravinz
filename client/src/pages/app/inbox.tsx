@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Mail,
@@ -178,6 +178,16 @@ export default function InboxPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
+  // Lock body scroll so only the panels scroll, not the page itself.
+  // Restored when navigating away.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
   const { data: threads = [], isLoading: threadsLoading } = useQuery<ThreadListItem[]>({
     queryKey: ["/api/inbox/threads", search],
     queryFn: () => apiGet<ThreadListItem[]>(`/api/inbox/threads${search ? `?search=${encodeURIComponent(search)}` : ""}`),
@@ -260,8 +270,9 @@ export default function InboxPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AppShell title="Inbox" fullHeight>
-        <div className="flex h-full overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
+      <AppShell title="Inbox">
+        {/* h accounts for standard AppShell overhead: pt-8 (2rem) + title (~2.25rem) + mt-6 (1.5rem) + pb-8 (2rem) ≈ 8rem */}
+        <div className="flex h-[calc(100dvh-8rem)] overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
           {/* =======================================================
                LAYOUT TIERS:
                Mobile  (< md  / < 768px) : single panel, mobileView state controls which
