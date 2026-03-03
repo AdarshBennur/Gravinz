@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { format, parseISO } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import {
   BarChart,
@@ -80,11 +81,20 @@ const typeLabel = (type: string) => {
 
 /* ─── Tooltip ────────────────────────────────────────────────────────────── */
 
+function formatTooltipDate(raw: string): string {
+  try {
+    // parseISO avoids the UTC-midnight-shifts-date-by-one-day bug from `new Date(str)`
+    return format(parseISO(raw), "MMM d, yyyy");
+  } catch {
+    return raw;
+  }
+}
+
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
     <div className="glass rounded-xl border px-3 py-2.5 text-xs shadow-xl">
-      <div className="mb-1.5 font-semibold text-foreground">{label}</div>
+      <div className="mb-1.5 font-semibold text-foreground">{formatTooltipDate(label)}</div>
       {payload.map((p: any) => (
         <div key={p.dataKey} className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full" style={{ background: p.fill || p.stroke }} />
