@@ -1,4 +1,4 @@
-# OutboundAI
+# GravinzAI
 
 Personalised Cold Email Automation Platform for job seekers and founders.
 
@@ -6,7 +6,7 @@ Personalised Cold Email Automation Platform for job seekers and founders.
 
 ## Overview
 
-OutboundAI automates the entire cold email outreach lifecycle — from generating personalized emails to scheduling follow-ups and tracking replies. It integrates with Gmail for sending, Notion for contact management, and OpenAI for context-aware email generation.
+GravinzAI automates the entire cold email outreach lifecycle — from generating personalized emails to scheduling follow-ups and tracking replies. It integrates with Gmail for sending, Notion for contact management, and OpenAI for context-aware email generation.
 
 **Problem:** Manual cold outreach is time-consuming, inconsistent, and difficult to scale. Writing individualized emails, tracking who replied, and following up at the right time requires sustained effort that most people abandon.
 
