@@ -32,7 +32,7 @@ export default function LandingPage() {
                 <Sparkles className="h-4 w-4" strokeWidth={2.2} />
               </div>
               <div className="text-sm font-semibold" data-testid="text-brand">
-                OutboundAI
+                GravinzAI
               </div>
             </Link>
 
@@ -103,7 +103,7 @@ export default function LandingPage() {
                   className="mt-5 max-w-xl text-balance text-base text-muted-foreground sm:text-lg"
                   data-testid="text-hero-subtitle"
                 >
-                  OutboundAI drafts personalized outreach, schedules follow-ups, and surfaces replies — so
+                  GravinzAI drafts personalized outreach, schedules follow-ups, and surfaces replies — so
                   you can focus on interviews, not inbox busywork.
                 </p>
 
@@ -400,7 +400,7 @@ export default function LandingPage() {
       <footer className="border-t bg-background/70 backdrop-blur">
         <Shell>
           <div className="flex flex-col gap-3 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-            <div data-testid="text-footer-copy">© {new Date().getFullYear()} OutboundAI</div>
+            <div data-testid="text-footer-copy">© {new Date().getFullYear()} GravinzAI</div>
             <div className="flex items-center gap-4">
               <a href="#" className="hover:text-foreground transition-colors" data-testid="link-footer-privacy">
                 Privacy

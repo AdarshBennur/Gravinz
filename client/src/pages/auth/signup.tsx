@@ -44,7 +44,7 @@ export default function SignupPage() {
     setLoading(true);
     try {
       await signup(username, password, email || undefined, fullName || undefined);
-      toast({ title: "Account created!", description: "Welcome to OutboundAI." });
+      toast({ title: "Account created!", description: "Welcome to GravinzAI." });
       setLocation("/app/dashboard");
     } catch (error: any) {
       toast({ title: "Signup failed", description: error.message || "Could not create account." });
