@@ -312,7 +312,7 @@ function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => 
               }
             >
               <div className="text-sm font-semibold" data-testid="text-app-brand">
-                OutboundAI
+                GravinzAI
               </div>
             </div>
           </Link>
@@ -453,7 +453,7 @@ export default function AppShell({
                       </div>
                       <div className="leading-tight">
                         <div className="text-sm font-semibold" data-testid="text-mobile-brand">
-                          OutboundAI
+                          GravinzAI
                         </div>
                       </div>
                     </div>

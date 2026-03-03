@@ -225,11 +225,15 @@
     text-rendering: geometricPrecision;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Prevent elastic overscroll bounce on all pages */
+    overscroll-behavior: none;
   }
 
   body {
     @apply font-sans antialiased bg-background text-foreground transition-colors duration-500;
     letter-spacing: var(--tracking-normal);
+    /* Prevent elastic overscroll bounce on all pages */
+    overscroll-behavior: none;
   }
 
   /* ── Cursor affordance (system-wide) ─────────────────────────────────────
