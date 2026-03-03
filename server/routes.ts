@@ -1241,9 +1241,43 @@ export async function registerRoutes(
     }
   });
 
+  // ── TEMPORARY DEBUG — remove after verification ────────────────────────────
+  app.get("/api/analytics/debug-sends", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      // All rows (no filter) — capped at 20 to inspect shape
+      const { data: all, error: e1 } = await supabaseAdmin
+        .from("email_sends")
+        .select("id, sent_at, status, followup_number, replied_at, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      // All-time count
+      const { count } = await supabaseAdmin
+        .from("email_sends")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId);
+      // Status breakdown
+      const { data: statuses } = await supabaseAdmin
+        .from("email_sends")
+        .select("status")
+        .eq("user_id", userId);
+      const statusBreakdown: Record<string, number> = {};
+      for (const r of statuses ?? []) {
+        const s = r.status ?? "null";
+        statusBreakdown[s] = (statusBreakdown[s] ?? 0) + 1;
+      }
+      console.log("[Analytics Debug]", { count, statusBreakdown, sample: all?.[0] });
+      res.json({ count, statusBreakdown, sample: all });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ── Advanced Analytics: email volume by day + follow-up type ──────────────
   // GET /api/analytics/email-volume?range=7d|30d|90d|180d
   app.get("/api/analytics/email-volume", requireAuth, async (req, res) => {
+
     try {
       const userId = getUserId(req);
 
