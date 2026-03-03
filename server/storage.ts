@@ -80,6 +80,7 @@ export interface IStorage {
   getEmailSendsForContact(userId: string, contactId: string): Promise<EmailSend[]>;
   createEmailSend(userId: string, contactId: string, data: Partial<EmailSend>): Promise<EmailSend>;
   updateEmailSend(id: string, data: Partial<EmailSend>): Promise<EmailSend | undefined>;
+  recordEmailClick(emailSendId: string): Promise<void>;
 
   getDailyUsage(userId: string, date: string): Promise<DailyUsage | undefined>;
   upsertDailyUsage(userId: string, date: string, data: Partial<DailyUsage>): Promise<DailyUsage>;
@@ -469,6 +470,31 @@ export class DatabaseStorage implements IStorage {
       .single();
     if (error) return undefined;
     return data ? keysToCamel<EmailSend>(data) : undefined;
+  }
+
+  async recordEmailClick(emailSendId: string): Promise<void> {
+    const now = new Date().toISOString();
+    // Fetch current click state to determine if this is the first click
+    const { data: existing } = await supabaseAdmin
+      .from("email_sends")
+      .select("click_count, first_clicked_at")
+      .eq("id", emailSendId)
+      .single();
+
+    if (!existing) return; // emailSendId not found — silently abort
+
+    const updates: Record<string, any> = {
+      click_count: (existing.click_count ?? 0) + 1,
+      last_clicked_at: now,
+    };
+    if (!existing.first_clicked_at) {
+      updates.first_clicked_at = now;
+    }
+
+    await supabaseAdmin
+      .from("email_sends")
+      .update(updates)
+      .eq("id", emailSendId);
   }
 
   // ─── Daily Usage ───────────────────────────────────────────

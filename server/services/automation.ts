@@ -7,6 +7,7 @@ import { type User, type Contact, type EmailSend, type CampaignSettings } from "
 import { syncContactStatusToNotion } from "./notion.ts";
 import { eq, and, desc } from "drizzle-orm";
 import { checkPlan, FREE_DAILY_LIMIT } from "./plan-guard.ts";
+import { randomUUID } from "crypto";
 
 let automationTask: ReturnType<typeof cron.schedule> | null = null;
 let replyCheckTask: ReturnType<typeof cron.schedule> | null = null;
@@ -560,7 +561,7 @@ export async function processUserAutomation(userId: string) {
     // ── LAYER 1: SEND ─────────────────────────────────────────────────────────
     // Generate + send. If this throws, we rollback the lock and skip commit.
     // Separation ensures that any post-send failure never silently skips the delay.
-    let sendResult: { emailContent: { subject: string; body: string }; result: { messageId: string; threadId?: string } } | null = null;
+    let sendResult: { emailContent: { subject: string; body: string }; result: { messageId: string; threadId?: string }; emailSendId: string } | null = null;
 
     try {
       // 1. Generate email content
@@ -612,7 +613,11 @@ export async function processUserAutomation(userId: string) {
         }
       }
 
-      // 4. Send via Gmail — MUST succeed before any state transition
+      // 4. Pre-generate emailSendId so that click-tracking tokens inside the
+      //    email body can resolve to this row when a recipient clicks a link.
+      const preGeneratedEmailSendId = randomUUID();
+
+      // 5. Send via Gmail — MUST succeed before any state transition
       console.log(`[AUTOMATION][C] Sending via Gmail to ${contact.email}`);
       const result = await sendEmailWithRetry(
         userId,
@@ -621,11 +626,12 @@ export async function processUserAutomation(userId: string) {
         emailContent.body,
         previousThreadId,
         previousMessageId,
-        attachments
+        attachments,
+        preGeneratedEmailSendId,
       );
       console.log(`[AUTOMATION][D] Gmail confirmed — messageId: ${result.messageId} for ${contact.email}`);
 
-      sendResult = { emailContent, result };
+      sendResult = { emailContent, result, emailSendId: preGeneratedEmailSendId };
 
     } catch (sendError: any) {
       // Send failed (AI generation or Gmail error). Roll back the lock so the
@@ -643,7 +649,7 @@ export async function processUserAutomation(userId: string) {
     // Each step is independently fault-tolerant. A DB failure must not block
     // the inbox record, and vice versa. Notion failure must never block either.
     if (sendResult) {
-      const { emailContent, result } = sendResult;
+      const { emailContent, result, emailSendId } = sendResult;
 
       // 2a. Update contact status + timestamp
       try {
@@ -656,10 +662,11 @@ export async function processUserAutomation(userId: string) {
         // If it throws, Notion was not reached — log and continue.
       }
 
-      // 2b. Create inbox email record
+      // 2b. Create inbox email record — use pre-generated ID so click tokens resolve correctly
       try {
         console.log(`[AUTOMATION][I] Creating inbox record for ${contact.email}`);
         await storage.createEmailSend(userId, contact.id, {
+          id: emailSendId,
           subject: emailContent.subject,
           body: emailContent.body,
           status: "sent",

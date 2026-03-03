@@ -52,12 +52,55 @@ const upload = multer({
 
 import { campaignSettings } from "@shared/schema";
 
+import { verifyClickToken } from "./services/click-tracker";
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
   startAutomationScheduler();
 
+  // ─── Click Tracking — PUBLIC (no auth, hit by email clients) ────────────
+  // GET /track/click?token=SIGNED_TOKEN&url=ENCODED_URL
+  // Validates the token, logs the click, and immediately 302-redirects the
+  // recipient to their intended destination. Must be fast — no heavy joins.
+  app.get("/track/click", async (req, res) => {
+    const { token, url } = req.query as { token?: string; url?: string };
+
+    // 1. Validate inputs exist
+    if (!token || !url) {
+      return res.status(400).send("Invalid tracking link.");
+    }
+
+    // 2. Decode and validate the destination URL
+    let decodedUrl: string;
+    try {
+      decodedUrl = decodeURIComponent(url);
+    } catch {
+      return res.status(400).send("Malformed URL.");
+    }
+
+    // 3. Security: block open redirects — only allow http:// and https://
+    const lowerUrl = decodedUrl.toLowerCase().trim();
+    if (!lowerUrl.startsWith("http://") && !lowerUrl.startsWith("https://")) {
+      return res.status(400).send("Invalid redirect target.");
+    }
+
+    // 4. Verify the HMAC-signed token
+    const payload = verifyClickToken(token);
+    if (!payload) {
+      // Token invalid or expired: redirect anyway to avoid broken links in old emails
+      return res.redirect(302, decodedUrl);
+    }
+
+    // 5. Record click asynchronously — don't block the redirect on DB latency
+    storage.recordEmailClick(payload.emailSendId).catch((err) => {
+      console.error("[Click Track] DB update failed:", err.message);
+    });
+
+    // 6. Instant 302 redirect — recipient sees no delay
+    return res.redirect(302, decodedUrl);
+  });
 
   // ─── Auth Endpoints (Supabase) ───────────────────────────────────────
 

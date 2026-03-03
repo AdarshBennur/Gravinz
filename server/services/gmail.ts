@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import { storage } from "../storage.ts";
 import { encryptToken, decryptToken } from "./encryption";
+import { rewriteLinksForTracking } from "./click-tracker";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/gmail.send",
@@ -222,7 +223,8 @@ export async function sendEmail(
   body: string,
   threadId?: string,
   inReplyToMessageId?: string,
-  attachments: Attachment[] = []
+  attachments: Attachment[] = [],
+  emailSendId?: string,   // Optional: when provided, links in the body are click-tracked
 ): Promise<{ messageId: string; threadId: string }> {
   if (process.env.MOCK_GMAIL === "true") {
     console.log(`[Gmail Mock] Sending test email.`);
@@ -251,7 +253,14 @@ export async function sendEmail(
       : fromEmail;
     // fromHeader intentionally not logged — contains PII
 
-    const raw = createRawEmail(to, fromHeader, subject, body, threadId, inReplyToMessageId, attachments);
+    // Rewrite links for click tracking if emailSendId is provided
+    let trackedBody = body;
+    if (emailSendId) {
+      const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 5001}`;
+      trackedBody = rewriteLinksForTracking(body, emailSendId, userId, baseUrl);
+    }
+
+    const raw = createRawEmail(to, fromHeader, subject, trackedBody, threadId, inReplyToMessageId, attachments);
 
 
     const sendParams: any = {

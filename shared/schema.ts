@@ -183,6 +183,10 @@ export const emailSends = pgTable("email_sends", {
   gmailMessageId: text("gmail_message_id"),
   gmailThreadId: text("gmail_thread_id"),
   errorMessage: text("error_message"),
+  // Click tracking
+  clickCount: integer("click_count").default(0).notNull(),
+  firstClickedAt: timestamp("first_clicked_at"),
+  lastClickedAt: timestamp("last_clicked_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

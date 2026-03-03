@@ -35,13 +35,14 @@ export async function sendEmailWithRetry(
     body: string,
     threadId?: string,
     inReplyToMessageId?: string,
-    attachments: { filename: string; content: Buffer; contentType: string }[] = []
+    attachments: { filename: string; content: Buffer; contentType: string }[] = [],
+    emailSendId?: string,
 ): Promise<{ messageId: string; threadId: string }> {
     let lastError: any;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            return await sendEmail(userId, to, subject, body, threadId, inReplyToMessageId, attachments);
+            return await sendEmail(userId, to, subject, body, threadId, inReplyToMessageId, attachments, emailSendId);
         } catch (error: any) {
             lastError = error;
 
