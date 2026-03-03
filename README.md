@@ -1,6 +1,6 @@
 # OutboundAI
 
-AI-powered cold email automation platform for job seekers and founders.
+Personalised Cold Email Automation Platform for job seekers and founders.
 
 ---
 
@@ -31,33 +31,33 @@ OutboundAI automates the entire cold email outreach lifecycle — from generatin
 
 ---
 
+## Email Automation Flow
+
+How the system automates end-to-end outreach.
+
+![Email Automation Flow](docs/architecture/email-automation.png)
+
+---
+
+## Resume Optimizer Flow
+
+How the system tailors resumes to job descriptions.
+
+![Resume Optimizer Flow](docs/architecture/resume-optimizer.png)
+
+---
+
+## Data Flow Diagram
+
+How data moves between external services and local analytics.
+
+![Data Flow Diagram](docs/architecture/data-flow.png)
+
+---
+
 ## System Architecture
 
-```
-┌─────────────────────────────┐
-│         Client              │
-│  React 19 + Vite + Tailwind │
-│  TanStack Query · Wouter    │
-└────────────┬────────────────┘
-             │ HTTP / REST
-┌────────────▼────────────────┐
-│         Server              │
-│  Node.js + Express 5        │
-│  Zod Validation             │
-│  JWT Auth                   │
-│  node-cron Scheduler        │
-└──┬──────┬──────┬────────────┘
-   │      │      │
-   ▼      ▼      ▼
-OpenAI  Gmail  Notion
- API     API    API
-   │
-   ▼
-┌─────────────────────────────┐
-│  Supabase (PostgreSQL)      │
-│  Auth · Storage · DB        │
-└─────────────────────────────┘
-```
+![System Architecture](docs/architecture/system-architecture.png)
 
 ### Frontend
 
@@ -194,6 +194,7 @@ NOTION_CLIENT_SECRET=            # Notion integration OAuth client secret
 **Note:** Never commit `.env` to version control. The `.gitignore` excludes it by default.
 
 To generate a valid `ENCRYPTION_KEY`:
+
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
