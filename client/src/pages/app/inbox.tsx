@@ -16,6 +16,8 @@ import {
   ChevronRight,
   Trash2,
   RotateCcw,
+  ArrowLeft,
+  Info,
 } from "lucide-react";
 
 import AppShell from "@/components/app/app-shell";
@@ -24,6 +26,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -162,6 +170,10 @@ export default function InboxPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [showClearModal, setShowClearModal] = useState(false);
+  // Mobile navigation state: "list" = show chat list, "conversation" = show thread
+  const [mobileView, setMobileView] = useState<"list" | "conversation">("list");
+  // Mobile details drawer state
+  const [showMobileDetails, setShowMobileDetails] = useState(false);
   const tz = useTimezone();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -251,8 +263,19 @@ export default function InboxPage() {
 
       <AppShell title="Inbox" subtitle="View conversations, track opens, and manage replies.">
         <div className="flex h-[calc(100vh-6rem)] overflow-hidden rounded-2xl border bg-background/50 backdrop-blur">
-          {/* LEFT SIDEBAR - Contact List */}
-          <div className="flex w-full flex-col border-r md:w-[320px] shrink-0">
+          {/* =======================================================
+               LAYOUT TIERS:
+               Mobile  (< md  / < 768px) : single panel, mobileView state controls which
+               Tablet  (md–lg / 768–1023px): 2 columns — sidebar 36% | conversation flex-1
+               Desktop (>= lg / >= 1024px): 3 columns — sidebar fixed | conv | details
+          ======================================================= */}
+
+          {/* LEFT SIDEBAR */}
+          <div className={`flex flex-col border-r shrink-0 ${
+            mobileView === "list"
+              ? "w-full md:w-[36%] md:max-w-[280px] lg:w-[280px]"
+              : "hidden md:flex md:w-[36%] md:max-w-[280px] lg:w-[280px]"
+          }`}>
             <div className="p-3 border-b space-y-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -310,7 +333,10 @@ export default function InboxPage() {
                   {threads.map((t) => (
                     <button
                       key={t.contactId}
-                      onClick={() => setSelectedId(t.contactId)}
+                      onClick={() => {
+                        setSelectedId(t.contactId);
+                        setMobileView("conversation");
+                      }}
                       className={
                         "w-full text-left rounded-xl px-3 py-2.5 transition-colors " +
                         (activeContactId === t.contactId
@@ -362,7 +388,10 @@ export default function InboxPage() {
           </div>
 
           {/* MIDDLE PANEL - Conversation Thread */}
-          <div className="flex flex-1 flex-col min-w-0 min-h-0 border-r">
+          {/* Mobile: show only when mobileView=conversation. Tablet+Desktop: always show */}
+          <div className={`flex-col min-w-0 min-h-0 border-r flex-1 ${
+            mobileView === "conversation" ? "flex" : "hidden md:flex"
+          }`}>
             {!activeContactId ? (
               <div className="flex-1 grid place-items-center text-muted-foreground text-sm">
                 Select a contact to view conversation
@@ -397,19 +426,37 @@ export default function InboxPage() {
                 <>
                   {/* Thread header */}
                   <div className="p-4 border-b flex items-center justify-between shrink-0">
-                    <div>
-                      <div className="font-semibold text-sm">{detail.contact.name}</div>
-                      <div className="text-xs text-muted-foreground">{detail.contact.email}</div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      {/* Mobile-only back button — hidden at md+ where both panels coexist */}
+                      <button
+                        className="md:hidden shrink-0 p-1 rounded-lg hover:bg-muted transition-colors"
+                        onClick={() => setMobileView("list")}
+                        aria-label="Back to inbox"
+                      >
+                        <ArrowLeft className="h-5 w-5" />
+                      </button>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm truncate">{detail.contact.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{detail.contact.email}</div>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       {usingFallback && (
-                        <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                        <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full hidden sm:inline">
                           local only
                         </span>
                       )}
                       <Badge variant={statusVariant[detail.contact.status] || "secondary"} className="rounded-full">
                         {detail.contact.status || "—"}
                       </Badge>
+                      {/* Info button: visible on mobile + tablet, hidden on desktop (lg) where details panel is permanent */}
+                      <button
+                        className="lg:hidden p-1.5 rounded-lg hover:bg-muted transition-colors"
+                        onClick={() => setShowMobileDetails(true)}
+                        aria-label="View contact details"
+                      >
+                        <Info className="h-4 w-4 text-muted-foreground" />
+                      </button>
                     </div>
                   </div>
 
@@ -516,8 +563,101 @@ export default function InboxPage() {
             })()}
           </div>
 
+          {/* MOBILE DETAILS DRAWER — Sheet that slides in from right on mobile/tablet */}
+          <Sheet open={showMobileDetails} onOpenChange={setShowMobileDetails}>
+            <SheetContent side="right" className="w-[300px] sm:w-[340px] overflow-y-auto p-0">
+              <SheetHeader className="p-4 border-b">
+                <SheetTitle className="text-sm">Contact Details</SheetTitle>
+              </SheetHeader>
+              {detail && (
+                <div className="p-4 space-y-5">
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <div className="grid size-10 place-items-center rounded-full bg-primary/10 text-primary shrink-0">
+                        <User className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm truncate">{detail.contact.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{detail.contact.email}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div className="space-y-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Details</div>
+                    {detail.contact.company && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>{detail.contact.company}</span>
+                      </div>
+                    )}
+                    {detail.contact.role && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <Briefcase className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>{detail.contact.role}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 text-sm">
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-muted-foreground">Added {formatFullDate(detail.contact.createdAt, tz)}</span>
+                    </div>
+                    {detail.contact.source && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="text-muted-foreground capitalize">Source: {detail.contact.source}</span>
+                      </div>
+                    )}
+                  </div>
+                  <Separator />
+                  <div className="space-y-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Email Analytics</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-xl border bg-background/60 p-3 text-center">
+                        <div className="text-lg font-bold">{detail.analytics.total}</div>
+                        <div className="text-[10px] text-muted-foreground">Total Sent</div>
+                      </div>
+                      <div className="rounded-xl border bg-background/60 p-3 text-center">
+                        <div className="text-lg font-bold">{detail.analytics.delivered}</div>
+                        <div className="text-[10px] text-muted-foreground">Delivered</div>
+                      </div>
+                      <div className="rounded-xl border bg-background/60 p-3 text-center">
+                        <div className="text-lg font-bold text-blue-500">{detail.analytics.opened}</div>
+                        <div className="text-[10px] text-muted-foreground">Opened</div>
+                      </div>
+                      <div className="rounded-xl border bg-background/60 p-3 text-center">
+                        <div className="text-lg font-bold text-green-500">{detail.analytics.replied}</div>
+                        <div className="text-[10px] text-muted-foreground">Replied</div>
+                      </div>
+                    </div>
+                  </div>
+                  <Separator />
+                  <div className="space-y-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Campaign Info</div>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Status</span>
+                        <Badge variant={statusVariant[detail.contact.status] || "secondary"} className="rounded-full text-[10px]">
+                          {detail.contact.status || "—"}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-muted-foreground">Follow-ups</span>
+                        <span className="font-medium">{detail.contact.followupsSent ?? 0}</span>
+                      </div>
+                      {detail.contact.lastSentAt && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-muted-foreground">Last sent</span>
+                          <span className="text-xs">{formatFullDate(detail.contact.lastSentAt, tz)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </SheetContent>
+          </Sheet>
 
-          {/* RIGHT PANEL - Contact Details & Analytics */}
+          {/* RIGHT PANEL - Contact Details & Analytics (desktop/lg only) */}
           <div className="hidden w-[300px] flex-col shrink-0 lg:flex">
             {detail ? (
               <div className="flex-1 overflow-y-auto min-h-0">
