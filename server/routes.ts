@@ -1241,6 +1241,124 @@ export async function registerRoutes(
     }
   });
 
+  // ── Advanced Analytics: email volume by day + follow-up type ──────────────
+  // GET /api/analytics/email-volume?range=7d|30d|90d|180d
+  app.get("/api/analytics/email-volume", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+
+      // Parse range param
+      const rangeParam = (req.query.range as string) || "30d";
+      const rangeDays = rangeParam === "7d" ? 7
+        : rangeParam === "90d" ? 90
+          : rangeParam === "180d" ? 180
+            : 30;
+
+      // Campaign settings — how many follow-ups the user has configured
+      const settings = await storage.getCampaignSettings(userId);
+      const followupCount = settings?.followupCount ?? 2;
+
+      // Date window
+      const now = new Date();
+      const startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - rangeDays + 1);
+      startDate.setHours(0, 0, 0, 0);
+      const startIso = startDate.toISOString();
+
+      // Fetch all sent emails in window — need sent_at, followup_number, status, replied_at
+      const { data: sends, error: sendsError } = await supabaseAdmin
+        .from("email_sends")
+        .select("sent_at, followup_number, status, replied_at")
+        .eq("user_id", userId)
+        .in("status", ["sent", "delivered", "opened", "replied"])
+        .not("sent_at", "is", null)
+        .gte("sent_at", startIso)
+        .order("sent_at", { ascending: true });
+
+      if (sendsError) throw sendsError;
+
+      // Build a map: date => { initial, followup_1, …, replies, total }
+      interface DayBucket { date: string; total: number; replies: number; initial: number;[key: string]: string | number; }
+      const bucketMap = new Map<string, DayBucket>();
+
+      // Pre-fill every day in range with zeros so gaps are explicit
+      for (let i = 0; i < rangeDays; i++) {
+        const d = new Date(startDate);
+        d.setDate(d.getDate() + i);
+        const key = d.toISOString().split("T")[0];
+        const bucket: DayBucket = { date: key, total: 0, replies: 0, initial: 0 };
+        for (let f = 1; f <= followupCount; f++) bucket[`followup_${f}`] = 0;
+        bucketMap.set(key, bucket);
+      }
+
+      // Aggregate email_sends into buckets
+      for (const row of sends ?? []) {
+        if (!row.sent_at) continue;
+        const key = (row.sent_at as string).split("T")[0];
+        let bucket = bucketMap.get(key);
+        if (!bucket) {
+          // Edge case: date outside pre-filled range — skip
+          continue;
+        }
+        const fn = Number(row.followup_number ?? 0);
+        const field = fn === 0 ? "initial" : `followup_${fn}`;
+        bucket[field] = Number(bucket[field] ?? 0) + 1;
+        bucket.total += 1;
+        if (row.status === "replied" || row.replied_at) bucket.replies += 1;
+      }
+
+      const volume = Array.from(bucketMap.values());
+
+      // ── Summary metrics ───────────────────────────────────────────────────
+      const totalSent = volume.reduce((s, d) => s + d.total, 0);
+      const totalReplies = volume.reduce((s, d) => s + d.replies, 0);
+      const avgPerDay = rangeDays > 0 ? Math.round((totalSent / rangeDays) * 10) / 10 : 0;
+
+      // Peak sending day
+      const peakDay = volume.reduce((best, d) => d.total > (best?.total ?? -1) ? d : best,
+        null as DayBucket | null);
+
+      // Per-type reply efficiency: how many replied rows per follow-up level
+      // (requires grouping by followup_number again for replied sends)
+      const effMap: Record<string, { sent: number; replied: number }> = { initial: { sent: 0, replied: 0 } };
+      for (let f = 1; f <= followupCount; f++) effMap[`followup_${f}`] = { sent: 0, replied: 0 };
+
+      for (const row of sends ?? []) {
+        const fn = Number(row.followup_number ?? 0);
+        const field = fn === 0 ? "initial" : `followup_${fn}`;
+        if (effMap[field]) {
+          effMap[field].sent += 1;
+          if (row.status === "replied" || row.replied_at) effMap[field].replied += 1;
+        }
+      }
+
+      const efficiency = Object.entries(effMap).map(([type, { sent, replied }]) => ({
+        type,
+        sent,
+        replied,
+        replyRate: sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0,
+      }));
+
+      res.json({
+        range: rangeParam,
+        followupCount,
+        volume,      // array of {date, total, replies, initial, followup_1, …}
+        summary: {
+          totalSent,
+          totalReplies,
+          replyRate: totalSent > 0 ? Math.round((totalReplies / totalSent) * 1000) / 10 : 0,
+          avgPerDay,
+          peakDay: peakDay ?? null,
+        },
+        efficiency,  // per-type reply rates
+      });
+    } catch (error: any) {
+      console.error("[Analytics email-volume] error:", error);
+      res.status(500).json({ message: "Failed to load analytics" });
+    }
+  });
+
+
   app.get("/api/activity", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
