@@ -454,36 +454,19 @@ export default function AnalyticsPage() {
           </h2>
         </div>
 
-        {/* Total count stat card */}
-        <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <Card className="glass p-4" data-testid="card-total-applications">
-            <div className="flex items-center justify-between">
-              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
-                Total Applied
-              </div>
-              <Briefcase className="h-4 w-4 text-muted-foreground" />
-            </div>
-            {jobLoading ? (
-              <div className="mt-2 h-8 w-16 animate-pulse rounded bg-muted" />
-            ) : (
-              <div
-                className="mt-1 text-3xl font-bold tracking-tight"
-                data-testid="value-total-applications"
-              >
-                {jobData?.totalApplications ?? 0}
-              </div>
-            )}
-            <div className="mt-1 text-xs text-muted-foreground">
-              contacts with a job link
-            </div>
-          </Card>
-        </div>
 
         {/* Applications table */}
         <Card className="glass overflow-hidden" data-testid="card-applications-list">
-          <div className="border-b px-4 py-3">
+          <div className="border-b px-4 py-3 flex items-center justify-between">
             <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Application List
+            </div>
+            <div className="text-xs text-muted-foreground" data-testid="value-total-applications">
+              {jobLoading ? (
+                <span className="inline-block h-3 w-10 animate-pulse rounded bg-muted" />
+              ) : (
+                <span>Total Applied: <span className="font-semibold text-foreground">{jobData?.totalApplications ?? 0}</span></span>
+              )}
             </div>
           </div>
 
@@ -509,7 +492,7 @@ export default function AnalyticsPage() {
                       Company
                     </th>
                     <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                      Role
+                      Applied
                     </th>
                     <th className="px-4 py-2.5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                       Link
