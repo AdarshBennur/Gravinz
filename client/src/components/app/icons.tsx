@@ -5,8 +5,8 @@ export function Mail() {
     <img
       src="/gmail.svg"
       alt="Gmail"
-      width={32}
-      height={32}
+      width={44}
+      height={44}
       aria-hidden="true"
       data-testid="icon-mail"
       style={{ objectFit: "contain" }}
@@ -19,8 +19,8 @@ export function NotionLogoIcon() {
     <img
       src="/notion.svg"
       alt="Notion"
-      width={32}
-      height={32}
+      width={44}
+      height={44}
       aria-hidden="true"
       data-testid="icon-notion"
       style={{ objectFit: "contain" }}
