@@ -1,6 +1,8 @@
 import { Client } from "@notionhq/client";
 import { storage } from "../storage.ts";
 import { encryptToken, decryptToken } from "./encryption";
+import { supabaseAdmin } from "../supabase.ts";
+
 
 function getNotionOAuthConfig() {
   const clientId = process.env.NOTION_CLIENT_ID;
@@ -479,21 +481,51 @@ export async function syncContactsFromNotion(
     }
   }
 
+  // ── STEP 5: Purge legacy orphan rows (source='notion', notionPageId IS NULL) ─
+  // After Step 2 stamped notionPageId on every live Notion row, any remaining
+  // notion contact with a null notionPageId could not be matched to a current
+  // Notion page and is therefore a phantom / legacy row that must be removed.
+  let orphanDeleted = 0;
+  try {
+    const { count: orphanCount, error: orphanError } = await supabaseAdmin
+      .from("contacts")
+      .delete({ count: "exact" })
+      .eq("user_id", userId)
+      .eq("source", "notion")
+      .is("notion_page_id", null);
+
+    if (orphanError) {
+      console.error("[Sync] Orphan cleanup error:", orphanError.message);
+      deleteErrors.push(`Orphan cleanup failed: ${orphanError.message}`);
+    } else {
+      orphanDeleted = orphanCount ?? 0;
+      if (orphanDeleted > 0) {
+        console.log(`[Sync] PURGED ${orphanDeleted} legacy orphan row(s) with null notion_page_id`);
+      }
+    }
+  } catch (e: any) {
+    console.error("[Sync] Orphan cleanup exception:", e.message);
+    deleteErrors.push(`Orphan cleanup exception: ${e.message}`);
+  }
+
   const totalErrors = [...upsertResult.errors, ...deleteErrors];
   const inserts = upsertResult.imported;
   const updates = upsertResult.skipped; // "skipped" in importContactsFromNotion = already-existed + updated
+  const totalDeleted = deleted + orphanDeleted;
 
   console.log(`[Sync] Inserts: ${inserts}`);
   console.log(`[Sync] Updates: ${updates}`);
-  console.log(`[Sync] Deletes: ${deleted}`);
+  console.log(`[Sync] Deletes (stale): ${deleted}`);
+  console.log(`[Sync] Deletes (orphan/null-id): ${orphanDeleted}`);
 
   return {
     imported: inserts,
     skipped: updates,
-    deleted,
+    deleted: totalDeleted,
     errors: totalErrors,
   };
 }
+
 
 function extractNotionValue(prop: any): string | null {
   if (!prop || !prop.type) return null;
