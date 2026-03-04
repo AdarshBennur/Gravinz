@@ -1392,6 +1392,39 @@ export async function registerRoutes(
     }
   });
 
+  // ── Job Applications Analytics ────────────────────────────────────────────
+  // GET /api/analytics/job-applications
+  // Returns contacts where job_link is non-empty (= "applied" jobs)
+  app.get("/api/analytics/job-applications", requireAuth, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+
+      const { data, error } = await supabaseAdmin
+        .from("contacts")
+        .select("company, role, job_link")
+        .eq("user_id", userId)
+        .not("job_link", "is", null)
+        .neq("job_link", "")
+        .order("updated_at", { ascending: false });
+
+      if (error) throw error;
+
+      const applications = (data ?? []).map((row: any) => ({
+        company: row.company ?? "",
+        role: row.role ?? "",
+        jobLink: row.job_link ?? "",
+      }));
+
+      res.json({
+        totalApplications: applications.length,
+        applications,
+      });
+    } catch (err: any) {
+      console.error("[Analytics job-applications] error:", err);
+      res.status(500).json({ message: "Failed to load job application analytics" });
+    }
+  });
+
 
   app.get("/api/activity", requireAuth, async (req, res) => {
     try {

@@ -14,7 +14,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { TrendingUp, Send, Calendar, Zap, BarChart3, ArrowUpRight } from "lucide-react";
+import { TrendingUp, Send, Calendar, Zap, BarChart3, ArrowUpRight, Briefcase, ExternalLink } from "lucide-react";
 
 import AppShell from "@/components/app/app-shell";
 import { Card } from "@/components/ui/card";
@@ -56,7 +56,18 @@ interface VolumeData {
   efficiency: EfficiencyRow[];
 }
 
-/* ─── Constants ─────────────────────────────────────────────────────────── */
+interface JobApplication {
+  company: string;
+  role: string;
+  jobLink: string;
+}
+
+interface JobApplicationData {
+  totalApplications: number;
+  applications: JobApplication[];
+}
+
+
 
 const RANGES: { label: string; value: Range }[] = [
   { label: "7d", value: "7d" },
@@ -126,6 +137,11 @@ export default function AnalyticsPage() {
   const { data, isLoading } = useQuery<VolumeData>({
     queryKey: ["/api/analytics/email-volume", range],
     queryFn: () => apiGet<VolumeData>(`/api/analytics/email-volume?range=${range}`),
+  });
+
+  const { data: jobData, isLoading: jobLoading } = useQuery<JobApplicationData>({
+    queryKey: ["/api/analytics/job-applications"],
+    queryFn: () => apiGet<JobApplicationData>("/api/analytics/job-applications"),
   });
 
   const followupCount = data?.followupCount ?? 2;
@@ -424,6 +440,111 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* ─── Job Applications ───────────────────────────────────────────── */}
+      <div className="mt-6">
+        <div className="mb-3 flex items-center gap-2">
+          <Briefcase className="h-4 w-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold tracking-tight" data-testid="heading-job-applications">
+            Job Applications
+          </h2>
+        </div>
+
+        {/* Total count stat card */}
+        <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <Card className="glass p-4" data-testid="card-total-applications">
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted-foreground font-medium uppercase tracking-wide">
+                Total Applied
+              </div>
+              <Briefcase className="h-4 w-4 text-muted-foreground" />
+            </div>
+            {jobLoading ? (
+              <div className="mt-2 h-8 w-16 animate-pulse rounded bg-muted" />
+            ) : (
+              <div
+                className="mt-1 text-3xl font-bold tracking-tight"
+                data-testid="value-total-applications"
+              >
+                {jobData?.totalApplications ?? 0}
+              </div>
+            )}
+            <div className="mt-1 text-xs text-muted-foreground">
+              contacts with a job link
+            </div>
+          </Card>
+        </div>
+
+        {/* Applications table */}
+        <Card className="glass overflow-hidden" data-testid="card-applications-list">
+          <div className="border-b px-4 py-3">
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Application List
+            </div>
+          </div>
+
+          {jobLoading ? (
+            <div className="space-y-2 p-4">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-10 w-full animate-pulse rounded-lg bg-muted" />
+              ))}
+            </div>
+          ) : !jobData?.applications?.length ? (
+            <div
+              className="flex h-32 items-center justify-center text-sm text-muted-foreground"
+              data-testid="empty-applications"
+            >
+              No applications found — add a job link to a contact to track it here.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm" data-testid="table-applications">
+                <thead>
+                  <tr className="border-b bg-muted/30">
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Company
+                    </th>
+                    <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Role
+                    </th>
+                    <th className="px-4 py-2.5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      Link
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobData.applications.map((app, idx) => (
+                    <tr
+                      key={idx}
+                      className="border-b last:border-0 hover:bg-muted/20 transition-colors"
+                      data-testid={`application-row-${idx}`}
+                    >
+                      <td className="px-4 py-3 font-medium">
+                        {app.company || <span className="text-muted-foreground italic">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {app.role || <span className="italic">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <a
+                          href={app.jobLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          aria-label={`View job posting at ${app.company}`}
+                          data-testid={`link-job-${idx}`}
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </Card>
