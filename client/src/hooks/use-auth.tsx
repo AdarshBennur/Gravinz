@@ -27,8 +27,42 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [loading, setLoading] = useState(true);
+  // ── Synchronous init: read cached user + token from localStorage instantly ──
+  // This eliminates the auth flicker on page refresh — UI sees correct state
+  // immediately, while the background API call silently re-validates.
+  const [user, setUserState] = useState<AuthUser | null>(() => {
+    try {
+      const token = localStorage.getItem("access_token") ||
+        sessionStorage.getItem("access_token");
+      if (!token) return null;
+      const cached = localStorage.getItem("auth:user");
+      if (cached) return JSON.parse(cached) as AuthUser;
+    } catch { /* ignore */ }
+    return null;
+  });
+
+  // loading = false immediately if we already have a cached answer
+  // (either no token → user is null, or cached user → user is set)
+  // Only true when a token exists but no cached user (rare: first load after
+  // login on a different device, or cache was cleared).
+  const [loading, setLoading] = useState<boolean>(() => {
+    try {
+      const token = localStorage.getItem("access_token") ||
+        sessionStorage.getItem("access_token");
+      if (!token) return false; // definitely logged out
+      const cached = localStorage.getItem("auth:user");
+      return !cached; // only spin if no cache
+    } catch { return true; }
+  });
+
+  // Wrapper that also persists to localStorage for next-render hydration
+  const setUser = (u: AuthUser | null) => {
+    setUserState(u);
+    try {
+      if (u) localStorage.setItem("auth:user", JSON.stringify(u));
+      else localStorage.removeItem("auth:user");
+    } catch { /* ignore */ }
+  };
 
   const refreshUser = useCallback(async () => {
     try {
@@ -130,8 +164,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     await apiPost("/api/auth/logout");
     clearTokens();
-    setUser(null);
+    setUser(null); // also clears localStorage cache via wrapper
   };
+
 
   return (
     <AuthContext.Provider value={{ user, loading, login, signup, logout, refreshUser }}>
