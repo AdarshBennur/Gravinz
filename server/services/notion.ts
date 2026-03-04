@@ -243,6 +243,7 @@ export async function importContactsFromNotion(
               ? reSlNoValue
               : currentNotionIndex;
             await storage.updateContact(existingContact.id, userId, {
+              notionPageId: page.id,   // ← critical: keep page ID in sync so delete detection works
               notionRowOrder: reResolvedOrder,
               notionData: notionData,
             } as any);

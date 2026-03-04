@@ -142,6 +142,8 @@ export default function AnalyticsPage() {
   const { data: jobData, isLoading: jobLoading } = useQuery<JobApplicationData>({
     queryKey: ["/api/analytics/job-applications"],
     queryFn: () => apiGet<JobApplicationData>("/api/analytics/job-applications"),
+    staleTime: 0,
+    refetchOnWindowFocus: true,
   });
 
   const followupCount = data?.followupCount ?? 2;
