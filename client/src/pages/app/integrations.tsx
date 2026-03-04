@@ -177,9 +177,7 @@ export default function IntegrationsPage() {
         <Card className="glass p-6" data-testid="card-gmail">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="grid size-10 place-items-center rounded-xl bg-background/70 border" data-testid="img-gmail">
-                <Mail />
-              </div>
+              <Mail />
               <div>
                 <div className="text-sm font-semibold" data-testid="text-gmail-title">Gmail</div>
                 <div className="text-xs text-muted-foreground" data-testid="text-gmail-sub">
@@ -246,9 +244,7 @@ export default function IntegrationsPage() {
         <Card className="glass p-6" data-testid="card-notion">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="grid size-10 place-items-center rounded-xl bg-background/70 border" data-testid="img-notion">
-                <NotionLogoIcon />
-              </div>
+              <NotionLogoIcon />
               <div>
                 <div className="text-sm font-semibold" data-testid="text-notion-title">Notion</div>
                 <div className="text-xs text-muted-foreground" data-testid="text-notion-sub">
