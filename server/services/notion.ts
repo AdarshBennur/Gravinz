@@ -135,11 +135,13 @@ export async function importContactsFromNotion(
   userId: string,
   databaseId: string,
   columnMapping?: ColumnMapping
-): Promise<{ imported: number; skipped: number; errors: string[] }> {
+): Promise<{ imported: number; skipped: number; errors: string[]; validEmails: Set<string> }> {
   const notion = await getNotionClient(userId);
   const errors: string[] = [];
+  const validEmails = new Set<string>(); // all real emails seen in this Notion sync
   let imported = 0;
   let skipped = 0;
+
   let rowNumber = 0;        // 1-based counter for logging (includes skipped)
   let notionIndex = 0;     // 0-based absolute position in Notion API results (never skips)
 
@@ -233,6 +235,9 @@ export async function importContactsFromNotion(
           console.log(`[Notion Import] ${errorMsg}`);
           continue;
         }
+
+        // Track every valid email we see from Notion (used for phantom-contact cleanup)
+        validEmails.add(email.toLowerCase().trim());
 
         // RE-IMPORT: if contact already exists, update its notion_row_order and notion_data
         // Use Sl No. value (same logic as fresh insert) for deterministic re-import order.
@@ -402,7 +407,7 @@ export async function importContactsFromNotion(
   }
 
   console.log(`[Notion Import] COMPLETE - Imported: ${imported}, Skipped: ${skipped}, Errors: ${errors.length}`);
-  return { imported, skipped, errors };
+  return { imported, skipped, errors, validEmails };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -508,15 +513,45 @@ export async function syncContactsFromNotion(
     deleteErrors.push(`Orphan cleanup exception: ${e.message}`);
   }
 
+  // ── STEP 6: Purge contacts whose email disappeared from Notion ────────────
+  // These contacts still have a valid notionPageId so the Step 3 delete never
+  // fires (their Notion page still exists). But their email field was cleared /
+  // changed in Notion meaning they can no longer be matched. We delete them now
+  // so the DB reflects the real state of Notion.
+  let emailGhostDeleted = 0;
+  try {
+    const allCurrentContacts = await storage.getContacts(userId);
+    const notionContactsCurrent = allCurrentContacts.filter(
+      (c: any) => c.source === "notion" && (c as any).notionPageId
+    );
+    for (const contact of notionContactsCurrent) {
+      const emailInDb: string = ((contact as any).email ?? "").toLowerCase().trim();
+      if (emailInDb && !upsertResult.validEmails.has(emailInDb)) {
+        try {
+          const ok = await storage.deleteContact(contact.id, userId);
+          if (ok) {
+            emailGhostDeleted++;
+            console.log(`[Sync] PURGED ghost contact ${contact.id} (${(contact as any).email}) — email no longer present in Notion`);
+          }
+        } catch (e: any) {
+          console.error(`[Sync] Failed to delete ghost contact ${contact.id}: ${e.message}`);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.error("[Sync] Email-ghost cleanup exception:", e.message);
+  }
+
   const totalErrors = [...upsertResult.errors, ...deleteErrors];
   const inserts = upsertResult.imported;
-  const updates = upsertResult.skipped; // "skipped" in importContactsFromNotion = already-existed + updated
-  const totalDeleted = deleted + orphanDeleted;
+  const updates = upsertResult.skipped;
+  const totalDeleted = deleted + orphanDeleted + emailGhostDeleted;
 
   console.log(`[Sync] Inserts: ${inserts}`);
   console.log(`[Sync] Updates: ${updates}`);
-  console.log(`[Sync] Deletes (stale): ${deleted}`);
-  console.log(`[Sync] Deletes (orphan/null-id): ${orphanDeleted}`);
+  console.log(`[Sync] Deletes (stale notionPageId): ${deleted}`);
+  console.log(`[Sync] Deletes (null notionPageId): ${orphanDeleted}`);
+  console.log(`[Sync] Deletes (email removed from Notion): ${emailGhostDeleted}`);
 
   return {
     imported: inserts,
@@ -525,6 +560,7 @@ export async function syncContactsFromNotion(
     errors: totalErrors,
   };
 }
+
 
 
 function extractNotionValue(prop: any): string | null {
