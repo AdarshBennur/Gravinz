@@ -1,6 +1,6 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { supabase } from "@/lib/supabase";
-import { apiGet, apiPost, setAccessToken, getAccessToken, clearTokens } from "@/lib/api";
+import { apiGet, apiPost, setAccessToken, getAccessToken } from "@/lib/api";
 
 interface AuthUser {
   id: string;
@@ -26,10 +26,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Keys we own — Supabase manages its own sb-* keys automatically.
+const OUR_TOKEN_KEYS = ["access_token", "refresh_token", "auth:user"];
+
+function clearOurTokens() {
+  OUR_TOKEN_KEYS.forEach((k) => {
+    try { localStorage.removeItem(k); } catch { /* ignore */ }
+    try { sessionStorage.removeItem(k); } catch { /* ignore */ }
+  });
+  setAccessToken(null);
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   // ── Synchronous init: read cached user + token from localStorage instantly ──
-  // This eliminates the auth flicker on page refresh — UI sees correct state
-  // immediately, while the background API call silently re-validates.
+  // Eliminates auth flicker on page refresh — UI sees correct state immediately.
   const [user, setUserState] = useState<AuthUser | null>(() => {
     try {
       const token = localStorage.getItem("access_token") ||
@@ -41,21 +51,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   });
 
-  // loading = false immediately if we already have a cached answer
-  // (either no token → user is null, or cached user → user is set)
-  // Only true when a token exists but no cached user (rare: first load after
-  // login on a different device, or cache was cleared).
   const [loading, setLoading] = useState<boolean>(() => {
     try {
       const token = localStorage.getItem("access_token") ||
         sessionStorage.getItem("access_token");
       if (!token) return false; // definitely logged out
       const cached = localStorage.getItem("auth:user");
-      return !cached; // only spin if no cache
+      return !cached; // only spin if no cached user
     } catch { return true; }
   });
 
-  // Wrapper that also persists to localStorage for next-render hydration
+  // Tracks whether WE initiated the sign-out, so the SIGNED_OUT listener
+  // doesn't accidentally wipe the custom JWT for non-OAuth users.
+  const logoutInitiated = useRef(false);
+
   const setUser = (u: AuthUser | null) => {
     setUserState(u);
     try {
@@ -66,7 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      // Only attempt if we have a stored token
       if (!getAccessToken()) {
         setUser(null);
         return;
@@ -74,54 +82,58 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await apiGet<AuthUser>("/api/auth/me");
       setUser(data);
     } catch {
-      // Token is invalid or expired — clear it
-      clearTokens();
+      // Token invalid or expired — clear only our tokens, not Supabase's
+      clearOurTokens();
       setUser(null);
     }
   }, []);
 
   useEffect(() => {
-    // Check for Supabase OAuth session first
+    // On app load: restore Supabase OAuth session if one exists
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.access_token) {
-        // Store Supabase OAuth tokens
+        // OAuth session exists — use Supabase token as our access token
         setAccessToken(session.access_token);
         if (session.refresh_token) {
           localStorage.setItem("refresh_token", session.refresh_token);
         }
-
-        // Sync OAuth user to database
         try {
           await apiPost("/api/auth/oauth-sync", {});
         } catch (error) {
           console.error("OAuth sync failed:", error);
         }
       }
-      // Then refresh user data
+      // Validate + hydrate user (works for both OAuth and custom JWT)
       refreshUser().finally(() => setLoading(false));
     });
 
-    // Listen for auth state changes (OAuth redirects)
+    // Listen for Supabase auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === "SIGNED_OUT") {
-        // Supabase session was destroyed — clear all local auth state
-        clearTokens();
-        setUser(null);
+        // Only clear our tokens if WE triggered the sign-out.
+        // Supabase fires SIGNED_OUT for non-OAuth sessions too — don't wipe
+        // the custom JWT in those cases.
+        if (logoutInitiated.current) {
+          clearOurTokens();
+          setUser(null);
+        }
         return;
       }
 
-      if (session?.access_token) {
+      if (event === "TOKEN_REFRESHED" && session?.access_token) {
+        // Supabase refreshed the OAuth token in the background — keep our copy in sync
+        setAccessToken(session.access_token);
+        return;
+      }
+
+      if (event === "SIGNED_IN" && session?.access_token) {
         setAccessToken(session.access_token);
         if (session.refresh_token) {
           localStorage.setItem("refresh_token", session.refresh_token);
         }
-
-        // Sync OAuth user to database
         try {
           await apiPost("/api/auth/oauth-sync", {});
           await refreshUser();
-
-          // Redirect to dashboard if on auth page
           if (window.location.pathname === "/login" || window.location.pathname === "/signup") {
             window.location.href = "/app/dashboard";
           }
@@ -169,23 +181,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    // Signal the SIGNED_OUT listener that we initiated this
+    logoutInitiated.current = true;
+
     try {
-      // 1. Destroy the Supabase OAuth session (removes sb-* keys from localStorage)
+      // Destroy Supabase OAuth session server-side
       await supabase.auth.signOut();
     } catch (e) {
       console.error("Supabase signOut error:", e);
     }
-    // 2. Call backend logout (invalidates server-side session/cookie if any)
+
+    // Notify backend (best-effort)
     try { await apiPost("/api/auth/logout"); } catch { /* ignore */ }
-    // 3. Clear all local tokens and cached user
-    clearTokens();
-    localStorage.removeItem("auth:user");
-    sessionStorage.clear();
+
+    // Clear ONLY our specific keys — do NOT call localStorage.clear()
+    // because that wipes Supabase's session keys and can cause the in-memory
+    // refresh timer to re-populate them, causing a re-login loop.
+    clearOurTokens();
     setUser(null);
-    // 4. Hard redirect — forces full page reload, clearing React Query cache
+
+    // Hard redirect clears React Query cache and React state tree
     window.location.href = "/login";
   };
-
 
   return (
     <AuthContext.Provider value={{ user, loading, login, signup, logout, refreshUser }}>
