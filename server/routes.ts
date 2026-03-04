@@ -1394,14 +1394,16 @@ export async function registerRoutes(
 
   // ── Job Applications Analytics ────────────────────────────────────────────
   // GET /api/analytics/job-applications
-  // Returns contacts where job_link is non-empty (= "applied" jobs)
+  // Returns unique job applications — deduplicated by job_link.
+  // "applied" role comes from notionData JSONB (Notion column named "applied"),
+  // not from the contacts.role column (which holds the contacted person's title).
   app.get("/api/analytics/job-applications", requireAuth, async (req, res) => {
     try {
       const userId = getUserId(req);
 
       const { data, error } = await supabaseAdmin
         .from("contacts")
-        .select("company, role, job_link")
+        .select("company, role, job_link, notion_data")
         .eq("user_id", userId)
         .not("job_link", "is", null)
         .neq("job_link", "")
@@ -1409,11 +1411,29 @@ export async function registerRoutes(
 
       if (error) throw error;
 
-      const applications = (data ?? []).map((row: any) => ({
-        company: row.company ?? "",
-        role: row.role ?? "",
-        jobLink: row.job_link ?? "",
-      }));
+      // Deduplicate by job_link — keep the first (most-recently-updated) row per link.
+      const seen = new Set<string>();
+      const applications: { company: string; role: string; jobLink: string }[] = [];
+
+      for (const row of data ?? []) {
+        const link: string = row.job_link ?? "";
+        if (!link || seen.has(link)) continue;
+        seen.add(link);
+
+        // Prefer the "applied" key from notionData (job role applied for).
+        // Fall back to contacts.role (person's title) if notionData is unavailable.
+        const nd = row.notion_data as Record<string, any> | null;
+        const appliedRole: string =
+          nd
+            ? (nd["applied"] ?? nd["Applied"] ?? nd["APPLIED"] ?? row.role ?? "")
+            : (row.role ?? "");
+
+        applications.push({
+          company: row.company ?? "",
+          role: appliedRole,
+          jobLink: link,
+        });
+      }
 
       res.json({
         totalApplications: applications.length,
@@ -1424,6 +1444,7 @@ export async function registerRoutes(
       res.status(500).json({ message: "Failed to load job application analytics" });
     }
   });
+
 
 
   app.get("/api/activity", requireAuth, async (req, res) => {
