@@ -102,7 +102,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
 
     // Listen for auth state changes (OAuth redirects)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_OUT") {
+        // Supabase session was destroyed — clear all local auth state
+        clearTokens();
+        setUser(null);
+        return;
+      }
+
       if (session?.access_token) {
         setAccessToken(session.access_token);
         if (session.refresh_token) {
@@ -162,9 +169,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await apiPost("/api/auth/logout");
+    try {
+      // 1. Destroy the Supabase OAuth session (removes sb-* keys from localStorage)
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.error("Supabase signOut error:", e);
+    }
+    // 2. Call backend logout (invalidates server-side session/cookie if any)
+    try { await apiPost("/api/auth/logout"); } catch { /* ignore */ }
+    // 3. Clear all local tokens and cached user
     clearTokens();
-    setUser(null); // also clears localStorage cache via wrapper
+    localStorage.removeItem("auth:user");
+    sessionStorage.clear();
+    setUser(null);
+    // 4. Hard redirect — forces full page reload, clearing React Query cache
+    window.location.href = "/login";
   };
 
 
