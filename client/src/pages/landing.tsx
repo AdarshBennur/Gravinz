@@ -1,11 +1,23 @@
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowRight, Check, Sparkles } from "lucide-react";
+import { ArrowRight, Check, LogOut, Monitor, Moon, Settings, Sparkles, Sun, User } from "lucide-react";
+import { useTheme } from "next-themes";
 
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -14,6 +26,120 @@ function Shell({ children }: { children: React.ReactNode }) {
       <div className="relative mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-8">
         {children}
       </div>
+    </div>
+  );
+}
+
+/* ─── Landing-page profile dropdown (when logged in) ───────────────────── */
+
+function LandingProfileMenu() {
+  const { user, logout } = useAuth();
+  const { setTheme } = useTheme();
+  const [, setLocation] = useLocation();
+
+  const handleLogout = async () => {
+    await logout();
+    setLocation("/");
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 rounded-xl"
+          data-testid="button-landing-user-menu"
+        >
+          <Avatar className="h-7 w-7">
+            <AvatarFallback>
+              <User className="h-4 w-4" />
+            </AvatarFallback>
+          </Avatar>
+        </Button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent side="bottom" align="end" className="w-52">
+        <DropdownMenuLabel data-testid="text-landing-user-label">
+          {user?.fullName || user?.username || "My Account"}
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onClick={() => setLocation("/app/dashboard")}
+          data-testid="landing-menu-dashboard"
+        >
+          <Sparkles className="mr-2 h-4 w-4" />
+          Dashboard
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => setLocation("/app/profile")}
+          data-testid="landing-menu-profile"
+        >
+          <User className="mr-2 h-4 w-4" />
+          Profile
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => setLocation("/app/settings")}
+          data-testid="landing-menu-settings"
+        >
+          <Settings className="mr-2 h-4 w-4" />
+          Settings
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuLabel className="text-xs text-muted-foreground font-normal pb-1">
+          Theme
+        </DropdownMenuLabel>
+        <DropdownMenuItem onClick={() => setTheme("light")} data-testid="landing-menu-theme-light">
+          <Sun className="mr-2 h-4 w-4" /> Light
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("dark")} data-testid="landing-menu-theme-dark">
+          <Moon className="mr-2 h-4 w-4" /> Dark
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => setTheme("system")} data-testid="landing-menu-theme-system">
+          <Monitor className="mr-2 h-4 w-4" /> System
+        </DropdownMenuItem>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem onClick={handleLogout} data-testid="landing-menu-logout">
+          <LogOut className="mr-2 h-4 w-4" />
+          Log out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/* ─── Header auth slot ──────────────────────────────────────────────────── */
+
+function HeaderAuthSlot() {
+  const { user, loading } = useAuth();
+
+  // While session is resolving, render an invisible placeholder to prevent layout shift
+  if (loading) {
+    return <div className="h-9 w-20" aria-hidden />;
+  }
+
+  if (user) {
+    return <LandingProfileMenu />;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Link href="/login" data-testid="link-login">
+        <Button variant="ghost" className="hidden sm:inline-flex" data-testid="button-login">
+          Login
+        </Button>
+      </Link>
+      <Link href="/signup" data-testid="link-signup">
+        <Button className="group" data-testid="button-signup">
+          Sign up
+          <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+        </Button>
+      </Link>
     </div>
   );
 }
@@ -60,19 +186,7 @@ export default function LandingPage() {
               </a>
             </nav>
 
-            <div className="flex items-center gap-2">
-              <Link href="/login" data-testid="link-login">
-                <Button variant="ghost" className="hidden sm:inline-flex" data-testid="button-login">
-                  Login
-                </Button>
-              </Link>
-              <Link href="/signup" data-testid="link-signup">
-                <Button className="group" data-testid="button-signup">
-                  Sign up
-                  <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
-                </Button>
-              </Link>
-            </div>
+            <HeaderAuthSlot />
           </div>
         </Shell>
       </header>
