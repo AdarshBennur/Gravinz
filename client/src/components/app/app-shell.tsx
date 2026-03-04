@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useAuth } from "@/hooks/use-auth";
+import { DemoModeBanner } from "@/components/app/demo-banner";
 
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -388,6 +389,8 @@ export default function AppShell({
     }
   });
 
+  const { user } = useAuth();
+
   const toggleCollapsed = () => {
     setCollapsed((c) => {
       const next = !c;
@@ -405,6 +408,8 @@ export default function AppShell({
 
           {/* ── Page content ── */}
           <div className="min-w-0 flex-1">
+            {/* Demo mode banner — shown when not logged in */}
+            {!user && <DemoModeBanner />}
             {/* Mobile hamburger — floating, no height impact on layout */}
             <div className="fixed left-3 top-3 z-30 lg:hidden">
               <Sheet>

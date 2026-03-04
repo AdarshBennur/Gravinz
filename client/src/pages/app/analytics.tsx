@@ -22,6 +22,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { apiGet } from "@/lib/api";
+import { useAuth } from "@/hooks/use-auth";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
@@ -133,10 +134,12 @@ function MetricSkeleton() {
 
 export default function AnalyticsPage() {
   const [range, setRange] = useState<Range>("30d");
+  const { user } = useAuth();
 
   const { data, isLoading } = useQuery<VolumeData>({
     queryKey: ["/api/analytics/email-volume", range],
     queryFn: () => apiGet<VolumeData>(`/api/analytics/email-volume?range=${range}`),
+    enabled: !!user,
   });
 
   const { data: jobData, isLoading: jobLoading } = useQuery<JobApplicationData>({
@@ -144,7 +147,9 @@ export default function AnalyticsPage() {
     queryFn: () => apiGet<JobApplicationData>("/api/analytics/job-applications"),
     staleTime: 0,
     refetchOnWindowFocus: true,
+    enabled: !!user,
   });
+
 
   const followupCount = data?.followupCount ?? 2;
   const volume = data?.volume ?? [];

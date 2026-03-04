@@ -22,8 +22,7 @@ import ProfilePage from "@/pages/app/profile";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
-  const { user, loading } = useAuth();
-  const [, setLocation] = useLocation();
+  const { loading } = useAuth();
 
   if (loading) {
     return (
@@ -33,13 +32,11 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
     );
   }
 
-  if (!user) {
-    setLocation("/login");
-    return null;
-  }
-
+  // No redirect — render the page in demo mode when logged out.
+  // Each page guards its own API calls with `enabled: !!user`.
   return <Component />;
 }
+
 
 function Router() {
   return (

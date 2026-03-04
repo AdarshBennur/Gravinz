@@ -17,6 +17,7 @@ import { queryClient } from "@/lib/queryClient";
 import { useTimezone } from "@/hooks/use-timezone";
 import { formatStartTime } from "@/lib/date-utils";
 import { EmailTestModal } from "@/components/email-test-modal";
+import { useAuth } from "@/hooks/use-auth";
 
 interface CampaignSettings {
   dailyLimit: number;
@@ -51,6 +52,7 @@ const TIMEZONES = [
 
 export default function CampaignSettingsPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [showTestModal, setShowTestModal] = useState(false);
   const [dailyLimit, setDailyLimit] = useState(80);
   const [followups, setFollowups] = useState(2);
@@ -64,7 +66,9 @@ export default function CampaignSettingsPage() {
   const { data, isLoading } = useQuery<CampaignSettings>({
     queryKey: ["/api/campaign-settings"],
     queryFn: () => apiGet<CampaignSettings>("/api/campaign-settings"),
+    enabled: !!user,
   });
+
 
   const automationStatus = data?.automationStatus || "stopped";
 

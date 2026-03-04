@@ -46,6 +46,7 @@ import { useToast } from "@/hooks/use-toast";
 
 import { apiGet, apiPost, apiRequest } from "@/lib/api";
 import { useTimezone } from "@/hooks/use-timezone";
+import { useAuth } from "@/hooks/use-auth";
 import { formatThreadTime, formatFullDate } from "@/lib/date-utils";
 
 interface ThreadListItem {
@@ -177,6 +178,7 @@ export default function InboxPage() {
   const tz = useTimezone();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   // Lock body scroll so only the panels scroll, not the page itself.
   // Restored when navigating away.
@@ -191,7 +193,9 @@ export default function InboxPage() {
   const { data: threads = [], isLoading: threadsLoading } = useQuery<ThreadListItem[]>({
     queryKey: ["/api/inbox/threads", search],
     queryFn: () => apiGet<ThreadListItem[]>(`/api/inbox/threads${search ? `?search=${encodeURIComponent(search)}` : ""}`),
+    enabled: !!user,
   });
+
 
   const activeContactId = selectedId || (threads.length > 0 ? threads[0].contactId : null);
 

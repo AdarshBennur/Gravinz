@@ -12,8 +12,10 @@ import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { apiGet, apiPost } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
+import { DemoModeBanner } from "@/components/app/demo-banner";
 
 function AnimatedNumber({ value }: { value: number }) {
   const mv = useMotionValue(0);
@@ -134,22 +136,26 @@ function BreakdownRow({ label, value, loading }: { label: string; value: number;
 
 export default function DashboardPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const { data, isLoading: loading } = useQuery<DashboardData>({
     queryKey: ["/api/dashboard"],
     queryFn: () => apiGet<DashboardData>("/api/dashboard"),
+    enabled: !!user,
   });
 
   const { data: metrics, isLoading: metricsLoading } = useQuery<MetricsData>({
     queryKey: ["/api/dashboard/metrics"],
     queryFn: () => apiGet<MetricsData>("/api/dashboard/metrics"),
     staleTime: 60_000,
+    enabled: !!user,
   });
 
   const { data: campaignSettings } = useQuery<{ timezone?: string }>({
     queryKey: ["/api/campaign-settings"],
     queryFn: () => apiGet<{ timezone?: string }>("/api/campaign-settings"),
     staleTime: 5 * 60_000,
+    enabled: !!user,
   });
 
   const resetLabel = useResetCountdown(campaignSettings?.timezone);

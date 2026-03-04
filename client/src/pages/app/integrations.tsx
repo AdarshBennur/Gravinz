@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { apiGet, apiPost } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 import { ColumnMappingDialog, ColumnMapping } from "@/components/app/column-mapping-dialog";
@@ -28,6 +29,7 @@ interface NotionDatabase {
 
 export default function IntegrationsPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [selectedDbId, setSelectedDbId] = useState("");
   const [mappingDialogOpen, setMappingDialogOpen] = useState(false);
   const [pendingMapping, setPendingMapping] = useState<ColumnMapping | null>(null);
@@ -56,7 +58,9 @@ export default function IntegrationsPage() {
   const { data, isLoading } = useQuery<IntegrationStatus>({
     queryKey: ["/api/integrations"],
     queryFn: () => apiGet<IntegrationStatus>("/api/integrations"),
+    enabled: !!user,
   });
+
 
   const gmailConnected = data?.gmail?.connected ?? false;
   const notionConnected = data?.notion?.connected ?? false;

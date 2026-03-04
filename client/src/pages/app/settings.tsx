@@ -13,6 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { apiGet, apiPut, apiPost, apiDelete, getAccessToken } from "@/lib/api";
 import { queryClient } from "@/lib/queryClient";
 
@@ -117,6 +118,7 @@ interface ProfileData {
 
 export default function ProfileSettingsPage() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const [skills, setSkills] = useState<string[]>([]);
   const [roles, setRoles] = useState<string[]>([]);
   const [tone, setTone] = useState("direct");
@@ -138,7 +140,9 @@ export default function ProfileSettingsPage() {
   const { data, isLoading } = useQuery<ProfileData>({
     queryKey: ["/api/profile"],
     queryFn: () => apiGet<ProfileData>("/api/profile"),
+    enabled: !!user,
   });
+
 
   useEffect(() => {
     if (data) {
