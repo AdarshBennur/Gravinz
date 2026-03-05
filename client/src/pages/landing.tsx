@@ -1,6 +1,23 @@
 import { Link, useLocation } from "wouter";
 import { motion } from "framer-motion";
-import { ArrowRight, Check, LogOut, Monitor, Moon, Settings, Sparkles, Sun, User } from "lucide-react";
+import {
+  ArrowRight,
+  BarChart3,
+  Check,
+  Inbox,
+  LogOut,
+  Mail,
+  Monitor,
+  Moon,
+  MousePointerClick,
+  NotebookText,
+  Settings,
+  Sparkles,
+  Sun,
+  User,
+  Workflow,
+  Zap,
+} from "lucide-react";
 import { useTheme } from "next-themes";
 
 import { useAuth } from "@/hooks/use-auth";
@@ -18,6 +35,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+/* ─── Layout shell ──────────────────────────────────────────────────────── */
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
@@ -118,7 +136,6 @@ function LandingProfileMenu() {
 function HeaderAuthSlot() {
   const { user, loading } = useAuth();
 
-  // While session is resolving, render an invisible placeholder to prevent layout shift
   if (loading) {
     return <div className="h-9 w-20" aria-hidden />;
   }
@@ -136,7 +153,7 @@ function HeaderAuthSlot() {
       </Link>
       <Link href="/signup" data-testid="link-signup">
         <Button className="group" data-testid="button-signup">
-          Sign up
+          Get started
           <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
         </Button>
       </Link>
@@ -144,9 +161,57 @@ function HeaderAuthSlot() {
   );
 }
 
+/* ─── Feature data ──────────────────────────────────────────────────────── */
+
+const features = [
+  {
+    icon: Mail,
+    title: "Email Automation",
+    desc: "Automatically send cold emails and multi-stage follow-ups on a configurable schedule — without touching the keyboard.",
+  },
+  {
+    icon: Sparkles,
+    title: "AI Personalization",
+    desc: "GPT-4o generates role-specific intros and subject lines tailored to each contact and job opportunity.",
+  },
+  {
+    icon: Zap,
+    title: "Gmail Integration",
+    desc: "Send emails directly through your own Gmail account. Your outreach, your sender reputation.",
+  },
+  {
+    icon: NotebookText,
+    title: "Notion Sync",
+    desc: "Import contacts and job opportunities directly from your Notion database. Stay in the tools you already use.",
+  },
+  {
+    icon: Inbox,
+    title: "Unified Inbox",
+    desc: "Track replies and conversations across all your outreach campaigns in one clean view.",
+  },
+  {
+    icon: MousePointerClick,
+    title: "Click Tracking",
+    desc: "See who opened your links, clicked your portfolio, and engaged with your emails.",
+  },
+  {
+    icon: BarChart3,
+    title: "Analytics Dashboard",
+    desc: "Monitor daily sending activity, reply rates, follow-up performance, and quota usage in real time.",
+  },
+  {
+    icon: Workflow,
+    title: "Smart Follow-Ups",
+    desc: "Configure up to 3 follow-up stages with custom delays. The system respects your daily limits automatically.",
+  },
+];
+
+/* ─── Page ──────────────────────────────────────────────────────────────── */
+
 export default function LandingPage() {
   return (
     <div className="min-h-dvh">
+      {/* ── Header ── */}
       <header className="sticky top-0 z-30 border-b bg-background/70 backdrop-blur">
         <Shell>
           <div className="flex h-16 items-center justify-between">
@@ -171,18 +236,11 @@ export default function LandingPage() {
                 Features
               </a>
               <a
-                href="#pricing"
+                href="#how-it-works"
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                data-testid="link-pricing"
+                data-testid="link-how-it-works"
               >
-                Pricing
-              </a>
-              <a
-                href="#security"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                data-testid="link-security"
-              >
-                Trust
+                How it works
               </a>
             </nav>
 
@@ -192,6 +250,7 @@ export default function LandingPage() {
       </header>
 
       <main>
+        {/* ── 1. Hero ── */}
         <Shell>
           <section className="relative py-16 sm:py-20 lg:py-28">
             <div className="mx-auto grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
@@ -202,29 +261,29 @@ export default function LandingPage() {
                   data-testid="badge-hero"
                 >
                   <span className="inline-block size-1.5 rounded-full bg-primary" />
-                  AI cold email automation for job seekers
+                  Outbound AI for Job Hunters
                 </Badge>
 
                 <h1
                   className="mt-5 text-balance text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl"
                   data-testid="text-hero-title"
                 >
-                  Send better cold emails.
-                  <span className="text-primary"> Get more replies.</span>
+                  Automate your outreach.
+                  <span className="text-primary"> Land more interviews.</span>
                 </h1>
 
                 <p
                   className="mt-5 max-w-xl text-balance text-base text-muted-foreground sm:text-lg"
                   data-testid="text-hero-subtitle"
                 >
-                  GravinzAI drafts personalized outreach, schedules follow-ups, and surfaces replies — so
-                  you can focus on interviews, not inbox busywork.
+                  GravinzAI connects to Gmail and Notion, drafts personalized cold emails with GPT-4o,
+                  and follows up automatically — so you can focus on interviews, not inbox busywork.
                 </p>
 
                 <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
                   <Link href="/signup" data-testid="link-cta-primary">
                     <Button size="lg" className="group" data-testid="button-cta-primary">
-                      Start free
+                      Start automating
                       <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                     </Button>
                   </Link>
@@ -241,23 +300,17 @@ export default function LandingPage() {
                 </div>
 
                 <div className="mt-8 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2" data-testid="text-hero-proof-1">
-                    <Check className="h-4 w-4 text-primary" />
-                    Smart follow-ups
-                  </div>
-                  <Separator orientation="vertical" className="hidden h-4 sm:block" />
-                  <div className="flex items-center gap-2" data-testid="text-hero-proof-2">
-                    <Check className="h-4 w-4 text-primary" />
-                    Reply tracking
-                  </div>
-                  <Separator orientation="vertical" className="hidden h-4 sm:block" />
-                  <div className="flex items-center gap-2" data-testid="text-hero-proof-3">
-                    <Check className="h-4 w-4 text-primary" />
-                    Gmail + Notion ready
-                  </div>
+                  {["Smart follow-ups", "Click tracking", "Gmail + Notion ready"].map((item, i) => (
+                    <span key={item} className="flex items-center gap-2" data-testid={`text-hero-proof-${i + 1}`}>
+                      {i > 0 && <Separator orientation="vertical" className="hidden h-4 sm:block" />}
+                      <Check className="h-4 w-4 text-primary" />
+                      {item}
+                    </span>
+                  ))}
                 </div>
               </motion.div>
 
+              {/* Hero mock card */}
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -269,59 +322,47 @@ export default function LandingPage() {
                     <div className="flex items-center justify-between">
                       <div>
                         <div className="text-sm font-medium" data-testid="text-hero-card-title">
-                          Today’s automation
+                          Today's automation
                         </div>
                         <div className="text-xs text-muted-foreground" data-testid="text-hero-card-subtitle">
                           Running with safe limits
                         </div>
                       </div>
-                      <Badge className="rounded-full" data-testid="status-automation">
-                        Live
-                      </Badge>
+                      <Badge className="rounded-full" data-testid="status-automation">Live</Badge>
                     </div>
 
                     <div className="mt-5 grid grid-cols-2 gap-3">
                       {[
-                        { label: "Emails sent", value: "42" },
-                        { label: "Replies", value: "7" },
-                        { label: "Follow-ups queued", value: "18" },
-                        { label: "Next send", value: "3m" },
+                        { label: "Emails sent", value: "27" },
+                        { label: "Replies", value: "5" },
+                        { label: "Follow-ups queued", value: "12" },
+                        { label: "Next send", value: "4m" },
                       ].map((s) => (
                         <div
                           key={s.label}
                           className="rounded-xl border bg-background/70 p-3"
                           data-testid={`card-hero-stat-${s.label.replaceAll(" ", "-")}`}
                         >
-                          <div className="text-xs text-muted-foreground" data-testid="text-stat-label">
-                            {s.label}
-                          </div>
-                          <div className="mt-1 text-lg font-semibold" data-testid="text-stat-value">
-                            {s.value}
-                          </div>
+                          <div className="text-xs text-muted-foreground">{s.label}</div>
+                          <div className="mt-1 text-lg font-semibold">{s.value}</div>
                         </div>
                       ))}
                     </div>
 
                     <div className="mt-5 rounded-xl border bg-background/70 p-3">
-                      <div className="text-xs font-medium" data-testid="text-hero-activity-title">
-                        Recent activity
-                      </div>
+                      <div className="text-xs font-medium">Recent activity</div>
                       <div className="mt-2 space-y-2 text-sm">
                         {[
-                          { who: "Jamie L.", what: "Replied to your email", time: "1h" },
-                          { who: "Ava R.", what: "Follow-up scheduled", time: "2h" },
-                          { who: "Niko S.", what: "Email drafted", time: "3h" },
+                          { who: "Priya M.", what: "Replied to your email", time: "1h" },
+                          { who: "Rohan S.", what: "Follow-up scheduled", time: "2h" },
+                          { who: "Anika T.", what: "Link clicked", time: "3h" },
                         ].map((a, idx) => (
                           <div key={idx} className="flex items-center justify-between" data-testid={`row-hero-activity-${idx}`}>
                             <div className="text-muted-foreground">
-                              <span className="text-foreground" data-testid="text-activity-who">
-                                {a.who}
-                              </span>{" "}
+                              <span className="text-foreground">{a.who}</span>{" "}
                               {a.what}
                             </div>
-                            <div className="text-xs text-muted-foreground" data-testid="text-activity-time">
-                              {a.time}
-                            </div>
+                            <div className="text-xs text-muted-foreground">{a.time}</div>
                           </div>
                         ))}
                       </div>
@@ -331,178 +372,156 @@ export default function LandingPage() {
               </motion.div>
             </div>
           </section>
+        </Shell>
 
+        {/* ── 2. Problem ── */}
+        <div className="border-y bg-muted/30">
+          <Shell>
+            <section className="py-14 sm:py-16">
+              <div className="mx-auto max-w-2xl text-center">
+                <h2 className="text-2xl font-semibold tracking-tight" data-testid="text-problem-title">
+                  Job hunting is a full-time job. It shouldn't be.
+                </h2>
+                <p className="mt-3 text-sm text-muted-foreground" data-testid="text-problem-sub">
+                  Reaching out to dozens of recruiters, tracking every thread, writing follow-ups, updating spreadsheets —
+                  it's overwhelming. Most candidates give up before anyone sees their work.
+                </p>
+              </div>
+
+              <div className="mt-10 grid gap-4 sm:grid-cols-3">
+                {[
+                  { stat: "80+", label: "Cold emails per successful offer on average" },
+                  { stat: "3×", label: "More replies from structured follow-up sequences" },
+                  { stat: "10h+", label: "Saved per week by automating repetitive outreach" },
+                ].map((item) => (
+                  <div
+                    key={item.stat}
+                    className="rounded-xl border bg-background/70 p-5 text-center"
+                    data-testid={`card-stat-${item.stat}`}
+                  >
+                    <div className="text-3xl font-semibold text-primary">{item.stat}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{item.label}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </Shell>
+        </div>
+
+        {/* ── 3. Features ── */}
+        <Shell>
           <section id="features" className="py-16 sm:py-20">
-            <div className="flex items-end justify-between gap-6">
-              <div>
-                <h2 className="text-2xl font-semibold tracking-tight" data-testid="text-features-title">
-                  Everything you need to stay consistent
+            <div className="text-center">
+              <h2 className="text-2xl font-semibold tracking-tight" data-testid="text-features-title">
+                Everything you need to run structured outreach
+              </h2>
+              <p className="mt-2 text-sm text-muted-foreground" data-testid="text-features-sub">
+                Built around your real workflow — Gmail, Notion, and AI working together.
+              </p>
+            </div>
+
+            <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {features.map((f, i) => {
+                const Icon = f.icon;
+                return (
+                  <motion.div
+                    key={f.title}
+                    initial={{ opacity: 0, y: 12 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true }}
+                    transition={{ duration: 0.4, delay: i * 0.05 }}
+                  >
+                    <Card
+                      className="glass hover-lift h-full p-5"
+                      data-testid={`card-feature-${f.title.replaceAll(" ", "-")}`}
+                    >
+                      <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                        <Icon className="h-4 w-4" strokeWidth={2.2} />
+                      </div>
+                      <div className="text-sm font-semibold" data-testid="text-feature-title">
+                        {f.title}
+                      </div>
+                      <div className="mt-2 text-sm text-muted-foreground" data-testid="text-feature-desc">
+                        {f.desc}
+                      </div>
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </section>
+        </Shell>
+
+        {/* ── 4. How it works ── */}
+        <div className="border-y bg-muted/30">
+          <Shell>
+            <section id="how-it-works" className="py-16 sm:py-20">
+              <div className="text-center">
+                <h2 className="text-2xl font-semibold tracking-tight" data-testid="text-how-title">
+                  Up and running in three steps
                 </h2>
-                <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-features-sub">
-                  A clean workflow from profile → contacts → campaigns → analytics.
+                <p className="mt-2 text-sm text-muted-foreground" data-testid="text-how-sub">
+                  Connect your tools once. The automation handles the rest.
                 </p>
               </div>
-            </div>
 
-            <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {[
-                {
-                  title: "AI personalization",
-                  desc: "Generate role-specific intros and subject lines without sounding robotic.",
-                },
-                {
-                  title: "Follow-up engine",
-                  desc: "Queue follow-ups automatically with guardrails for daily limits.",
-                },
-                {
-                  title: "Reply monitoring",
-                  desc: "Track replies and mark contacts for follow-up in one place.",
-                },
-                {
-                  title: "Templates & tone",
-                  desc: "Choose formal, casual, or direct — and override prompts when needed.",
-                },
-                {
-                  title: "CSV imports",
-                  desc: "Bring contacts in fast. Bulk actions keep your pipeline tidy.",
-                },
-                {
-                  title: "Analytics",
-                  desc: "Know what’s working: reply rate, subject performance, and follow-up impact.",
-                },
-              ].map((f) => (
-                <Card
-                  key={f.title}
-                  className="glass hover-lift p-5"
-                  data-testid={`card-feature-${f.title.replaceAll(" ", "-")}`}
-                >
-                  <div className="text-sm font-semibold" data-testid="text-feature-title">
-                    {f.title}
-                  </div>
-                  <div className="mt-2 text-sm text-muted-foreground" data-testid="text-feature-desc">
-                    {f.desc}
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </section>
-
-          <section id="security" className="py-16 sm:py-20">
-            <Card className="glass p-6 sm:p-8" data-testid="card-trust">
-              <div className="grid gap-6 lg:grid-cols-3">
-                <div>
-                  <h3 className="text-lg font-semibold" data-testid="text-trust-title">
-                    Designed for trust
-                  </h3>
-                  <p className="mt-2 text-sm text-muted-foreground" data-testid="text-trust-sub">
-                    Sensible limits, clear controls, and a transparent workflow.
-                  </p>
-                </div>
-                <div className="lg:col-span-2 grid gap-3 sm:grid-cols-3">
-                  {["Daily send caps", "Audit-friendly activity", "No surprise automations"].map((t) => (
-                    <div
-                      key={t}
-                      className="rounded-xl border bg-background/70 p-4"
-                      data-testid={`card-trust-pill-${t.replaceAll(" ", "-")}`}
-                    >
-                      <div className="text-sm font-medium" data-testid="text-trust-pill">
-                        {t}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground" data-testid="text-trust-pill-sub">
-                        Built to feel safe and professional.
-                      </div>
+              <div className="mt-12 grid gap-8 sm:grid-cols-3">
+                {[
+                  {
+                    step: "01",
+                    title: "Connect Gmail",
+                    desc: "Authorize GravinzAI to send emails on your behalf through your own Gmail account.",
+                  },
+                  {
+                    step: "02",
+                    title: "Import from Notion",
+                    desc: "Pull your contact list and job opportunities directly from your Notion database.",
+                  },
+                  {
+                    step: "03",
+                    title: "Launch your campaign",
+                    desc: "Set your daily limit and follow-up schedule. GravinzAI takes it from there.",
+                  },
+                ].map((item) => (
+                  <div key={item.step} className="relative" data-testid={`card-step-${item.step}`}>
+                    <div className="mb-4 text-4xl font-semibold text-primary/20 leading-none">
+                      {item.step}
                     </div>
-                  ))}
-                </div>
-              </div>
-            </Card>
-          </section>
-
-          <section id="pricing" className="py-16 sm:py-20">
-            <div className="flex items-end justify-between gap-6">
-              <div>
-                <h2 className="text-2xl font-semibold tracking-tight" data-testid="text-pricing-title">
-                  Simple pricing
-                </h2>
-                <p className="mt-2 max-w-2xl text-sm text-muted-foreground" data-testid="text-pricing-sub">
-                  Start small, then scale up when you’re ready.
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-8 grid gap-4 lg:grid-cols-2">
-              {[
-                {
-                  name: "Basic",
-                  price: "$19",
-                  perks: ["500 emails / month", "2 follow-ups", "Basic analytics"],
-                },
-                {
-                  name: "Pro",
-                  price: "$49",
-                  perks: ["Unlimited contacts", "5 follow-ups", "Advanced analytics"],
-                },
-              ].map((p) => (
-                <Card key={p.name} className="glass hover-lift p-6" data-testid={`card-pricing-${p.name}`}>
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-sm font-semibold" data-testid="text-plan-name">
-                        {p.name}
-                      </div>
-                      <div className="mt-2 text-3xl font-semibold" data-testid="text-plan-price">
-                        {p.price}
-                        <span className="text-sm text-muted-foreground">/mo</span>
-                      </div>
-                    </div>
-                    {p.name === "Pro" ? (
-                      <Badge className="rounded-full" data-testid="badge-most-popular">
-                        Most popular
-                      </Badge>
-                    ) : null}
+                    <div className="text-base font-semibold">{item.title}</div>
+                    <p className="mt-2 text-sm text-muted-foreground">{item.desc}</p>
                   </div>
+                ))}
+              </div>
+            </section>
+          </Shell>
+        </div>
 
-                  <div className="mt-5 space-y-2 text-sm">
-                    {p.perks.map((perk) => (
-                      <div
-                        key={perk}
-                        className="flex items-center gap-2"
-                        data-testid={`text-perk-${perk.replaceAll(" ", "-")}`}
-                      >
-                        <Check className="h-4 w-4 text-primary" />
-                        <span className="text-muted-foreground">{perk}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <Link href="/signup" className="mt-6 block" data-testid="link-pricing-cta">
-                    <Button
-                      className="w-full"
-                      variant={p.name === "Pro" ? "default" : "secondary"}
-                      data-testid="button-pricing-cta"
-                    >
-                      Choose {p.name}
-                    </Button>
-                  </Link>
-                </Card>
-              ))}
-            </div>
-          </section>
-
-          <section className="pb-16 sm:pb-24">
-            <Card className="glass p-6 sm:p-10" data-testid="card-final-cta">
-              <div className="flex flex-col items-start justify-between gap-6 sm:flex-row sm:items-center">
-                <div>
-                  <h3 className="text-xl font-semibold" data-testid="text-final-cta-title">
-                    Ready to run your outreach like a system?
-                  </h3>
-                  <p className="mt-2 text-sm text-muted-foreground" data-testid="text-final-cta-sub">
-                    Build a repeatable process for high-quality applications.
-                  </p>
-                </div>
+        {/* ── 5. Final CTA ── */}
+        <Shell>
+          <section className="py-16 pb-24 sm:py-20 sm:pb-28">
+            <Card className="glass p-8 sm:p-12 text-center" data-testid="card-final-cta">
+              <h2
+                className="text-2xl font-semibold tracking-tight sm:text-3xl"
+                data-testid="text-final-cta-title"
+              >
+                Start your automated outreach system today.
+              </h2>
+              <p
+                className="mt-3 text-sm text-muted-foreground"
+                data-testid="text-final-cta-sub"
+              >
+                Connect Gmail, import from Notion, and let the AI handle the rest.
+              </p>
+              <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
                 <Link href="/signup" data-testid="link-final-cta">
                   <Button size="lg" className="group" data-testid="button-final-cta">
-                    Start automation
+                    Get started
                     <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                  </Button>
+                </Link>
+                <Link href="/login" data-testid="link-final-login">
+                  <Button size="lg" variant="secondary" data-testid="button-final-login">
+                    Sign in
                   </Button>
                 </Link>
               </div>
@@ -511,6 +530,7 @@ export default function LandingPage() {
         </Shell>
       </main>
 
+      {/* ── Footer ── */}
       <footer className="border-t bg-background/70 backdrop-blur">
         <Shell>
           <div className="flex flex-col gap-3 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
