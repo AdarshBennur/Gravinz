@@ -261,15 +261,15 @@ export default function LandingPage() {
                   data-testid="badge-hero"
                 >
                   <span className="inline-block size-1.5 rounded-full bg-primary" />
-                  Outbound AI for Job Hunters
+                  AI-Powered Outreach Automation
                 </Badge>
 
                 <h1
                   className="mt-5 text-balance text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl"
                   data-testid="text-hero-title"
                 >
-                  Automate your outreach.
-                  <span className="text-primary"> Land more interviews.</span>
+                  Automate personalized cold outreach.
+                  <span className="text-primary"> Get more replies.</span>
                 </h1>
 
                 <p
