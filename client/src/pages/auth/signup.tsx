@@ -55,12 +55,13 @@ export default function SignupPage() {
 
   const handleGoogleSignup = async () => {
     try {
+      const redirectUrl = `${window.location.origin}/auth/callback`;
+      console.log("[OAuth] redirect URL:", redirectUrl);
+
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          // Dynamic origin keeps localhost on localhost and production on production.
-          // /auth/callback is the dedicated OAuth exchange page.
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: redirectUrl,
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
