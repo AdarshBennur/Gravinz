@@ -201,7 +201,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
 
     // Hard redirect clears React Query cache and React state tree
-    window.location.href = "/login";
+    window.location.href = "/";
   };
 
   return (
