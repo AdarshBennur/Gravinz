@@ -12,6 +12,7 @@ import LandingPage from "@/pages/landing";
 import LoginPage from "@/pages/auth/login";
 import SignupPage from "@/pages/auth/signup";
 import ForgotPasswordPage from "@/pages/auth/forgot";
+import AuthCallbackPage from "@/pages/auth/callback";
 import DashboardPage from "@/pages/app/dashboard";
 import CampaignSettingsPage from "@/pages/app/campaigns";
 import AnalyticsPage from "./pages/app/analytics";
@@ -46,6 +47,7 @@ function Router() {
       <Route path="/login" component={LoginPage} />
       <Route path="/signup" component={SignupPage} />
       <Route path="/forgot-password" component={ForgotPasswordPage} />
+      <Route path="/auth/callback" component={AuthCallbackPage} />
 
       <Route path="/app" component={() => <Redirect to="/app/dashboard" />} />
       <Route path="/app/dashboard" component={() => <ProtectedRoute component={DashboardPage} />} />
